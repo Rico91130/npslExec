@@ -1,30 +1,15 @@
 javascript:(function(){
-    /* CONFIGURATION - Vos URLs Git RAW */
-    const BASE_URL = "https://raw.githubusercontent.com/Rico91130/npslExec/main/";
+    const REPO = "https://raw.githubusercontent.com/Rico91130/npslExec/main/";
     const FILES = [
-        { name: 'moteur.js', storageKey: 'MON_MOTEUR_LIB' },
-        { name: 'client.js', storageKey: 'MON_MOTEUR_CLIENT' }
+        { name: 'moteur.js', key: 'MON_MOTEUR_LIB' },
+        { name: 'dashboard.js', key: 'MON_DASHBOARD' }, // Nouveau !
+        { name: 'toolbar.js', key: 'MON_TOOLBAR' }      // Nouveau !
     ];
 
-    console.log("⬇️ Téléchargement des outils de test...");
-
-    /* Téléchargement en parallèle */
-    Promise.all(FILES.map(file => 
-        fetch(BASE_URL + file.name)
-            .then(res => {
-                if (!res.ok) throw new Error(`Erreur ${res.status} sur ${file.name}`);
-                return res.text();
-            })
-            .then(code => {
-                localStorage.setItem(file.storageKey, code);
-                return `${file.name} (v${code.length})`;
-            })
-    ))
-    .then(results => {
-        alert(`✅ Succès !\nMis à jour :\n- ${results.join('\n- ')}`);
+    Promise.all(FILES.map(f => fetch(REPO + f.name).then(r => r.text()).then(c => localStorage.setItem(f.key, c))))
+    .then(() => {
+        // Exécution immédiate du Dashboard
+        window.eval(localStorage.getItem('MON_DASHBOARD'));
     })
-    .catch(err => {
-        alert("❌ Erreur de mise à jour : " + err.message);
-        console.error(err);
-    });
+    .catch(e => alert("Erreur MAJ: " + e));
 })();
