@@ -5,10 +5,8 @@ javascript:(function(){
         { name: 'dashboard.js', key: 'MON_DASHBOARD' },
         { name: 'toolbar.js', key: 'MON_TOOLBAR' }
     ];
-
     Promise.all(FILES.map(f => fetch(REPO + f.name).then(r => r.text()).then(c => localStorage.setItem(f.key, c))))
     .then(() => {
-        // Exécution immédiate du Dashboard
         window.eval(localStorage.getItem('MON_DASHBOARD'));
     })
     .catch(e => alert("Erreur MAJ: " + e));
