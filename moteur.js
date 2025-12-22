@@ -1,43 +1,59 @@
 /**
- * MOTEUR V3 - Pilotable par Toolbar
+ * MOTEUR V3.1 - Avec Logs Verbeux
  */
 window.FormulaireTester = {
     // Configuration globale
     config: {
         autoNext: false,
-        stepDelay: 100
+        stepDelay: 100,
+        verbose: false // Désactivé par défaut
     },
 
     /**
-     * Exécute le remplissage pour la PAGE COURANTE seulement
-     * Retourne true si des champs ont été modifiés
+     * Helper pour logger uniquement si activé
      */
+    log: function(msg, emoji = 'ℹ️', data = null) {
+        if (this.config.verbose) {
+            const prefix = `%c[TESTER] ${emoji}`;
+            const style = 'color: #cd094f; font-weight: bold;';
+            if (data) console.log(prefix + ' ' + msg, style, data);
+            else console.log(prefix + ' ' + msg, style);
+        }
+    },
+
     runPage: async function(scenario) {
-        // Préparation des données (nettoyage brouillon)
         const data = this.prepareData(scenario);
         let actionCount = 0;
 
-        // On ne boucle que sur les champs VISIBLES dans le DOM actuel
-        // Cela évite d'attendre des champs qui sont sur d'autres pages
+        // Analyse du DOM
         const visibleInputs = document.querySelectorAll('input, select, textarea');
-        
-        // On crée un map des champs visibles pour aller vite
         const visibleKeys = new Set();
         visibleInputs.forEach(el => {
-            // On remonte au conteneur data-clef si possible
             const container = el.closest('[data-clef]');
             if(container) visibleKeys.add(container.getAttribute('data-clef'));
             if(el.id) visibleKeys.add(el.id);
             if(el.name) visibleKeys.add(el.name);
         });
 
-        console.log(`🔎 Analyse page : ${visibleKeys.size} champs détectés.`);
+        this.log(`Analyse de la page : ${visibleKeys.size} champs interactifs détectés.`, '🔍', [...visibleKeys]);
 
         for (const [key, val] of Object.entries(data)) {
-            // Optimisation : on ne tente de remplir que si la clé semble présente visuellement
+            // Check visibilité
             if (this.isKeyVisible(key, visibleKeys)) {
+                this.log(`Tentative de remplissage pour '${key}'...`, '👉');
                 const result = await this.tryFill(key, val);
-                if (result === 'OK') actionCount++;
+                
+                if (result === 'OK') {
+                    actionCount++;
+                    this.log(`Succès pour '${key}'`, '✅');
+                } else if (result === 'SKIPPED') {
+                    this.log(`Ignoré '${key}' (Déjà rempli ou identique)`, '⏭️');
+                } else {
+                    this.log(`Échec pour '${key}' (Technique)`, '❌');
+                }
+            } else {
+                // Utile pour savoir quels champs du scénario sont "hors scope"
+                // this.log(`Champ '${key}' non visible sur cette page.`, '👻'); 
             }
         }
         
@@ -45,9 +61,7 @@ window.FormulaireTester = {
     },
 
     isKeyVisible: function(key, set) {
-        // Recherche exacte ou partielle simple
         if (set.has(key)) return true;
-        // Pour les adresses complexes (ex: adresseDeclarant_voie...), on vérifie le préfixe
         for (let k of set) {
             if (key.startsWith(k)) return true;
         }
@@ -73,8 +87,7 @@ window.FormulaireTester = {
             let field = container ? container.querySelector('input, select, textarea') : null;
             if (!field) field = document.querySelector(`#${key}, [name="${key}"]`);
 
-            if (field && field.offsetParent !== null) { // Visible uniquement
-                // Vérification si déjà rempli pour ne pas spammer
+            if (field && field.offsetParent !== null) {
                 if (this.isValueAlreadySet(field, val)) {
                      resolve('SKIPPED');
                      return;
@@ -86,6 +99,7 @@ window.FormulaireTester = {
                     resolve('KO');
                 }
             } else {
+                this.log(`Champ '${key}' trouvé mais invisible ou inaccessible.`, '⚠️');
                 resolve('ABSENT');
             }
         });
@@ -93,7 +107,8 @@ window.FormulaireTester = {
 
     isValueAlreadySet: function(el, val) {
         if (el.type === 'checkbox' || el.type === 'radio') return el.checked === val;
-        return el.value == val; // Loose equality pour "12" vs 12
+        // Comparaison souple pour gérer les conversions string/number
+        return el.value == val; 
     },
 
     fillField: function(el, val) {
@@ -110,10 +125,13 @@ window.FormulaireTester = {
                     if (el.options[i].text.includes(val)) {
                         el.selectedIndex = i;
                         found = true;
+                        // Log précis pour les selects (souvent source d'erreur)
+                        this.log(`Option sélectionnée : "${el.options[i].text}" (index ${i})`, '🔽');
                         break;
                     }
                 }
                 if (found) el.dispatchEvent(new Event('change', { bubbles: true }));
+                else this.log(`Aucune option contenant "${val}" trouvée dans le select.`, '⚠️');
             } else {
                 el.value = val;
                 el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -121,6 +139,9 @@ window.FormulaireTester = {
             }
             el.blur();
             return true;
-        } catch (e) { return false; }
+        } catch (e) { 
+            this.log(`Exception lors du remplissage : ${e.message}`, '🔥');
+            return false; 
+        }
     }
 };
