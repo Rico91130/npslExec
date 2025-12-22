@@ -1,5 +1,7 @@
-(function(){
+javascript:(function(){
+    /* L'URL BRUTE de votre fichier JS hébergé (ex: Gist Raw) */
     const URL_MOTEUR = "https://gist.githubusercontent.com/Rico91130/83d163d4902414dc970d642164fc07f6/raw/35a5f1118ac5b3e0dbe4e1410372eaa6b7eea7d0/gistfile1.txt";
+
     console.log("⬇️ Téléchargement du moteur depuis " + URL_MOTEUR);
     
     fetch(URL_MOTEUR)
