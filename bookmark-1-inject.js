@@ -1,22 +1,30 @@
 javascript:(function(){
-    /* L'URL BRUTE de votre fichier JS hébergé (ex: Gist Raw) */
-    const URL_MOTEUR = "https://raw.githubusercontent.com/Rico91130/npslExec/main/moteur.js";
+    /* CONFIGURATION - Vos URLs Git RAW */
+    const BASE_URL = "https://raw.githubusercontent.com/Rico91130/npslExec/main/";
+    const FILES = [
+        { name: 'moteur.js', storageKey: 'MON_MOTEUR_LIB' },
+        { name: 'client.js', storageKey: 'MON_MOTEUR_CLIENT' }
+    ];
 
-    console.log("⬇️ Téléchargement du moteur depuis " + URL_MOTEUR);
-    
-    fetch(URL_MOTEUR)
-        .then(response => {
-            if (!response.ok) throw new Error("Erreur HTTP " + response.status);
-            return response.text();
-        })
-        .then(code => {
-            /* On stocke le code téléchargé dans le localStorage partagé */
-            localStorage.setItem('MON_MOTEUR_TEST', code);
-            alert("✅ Moteur mis à jour avec succès dans le LocalStorage !");
-            console.log("Code stocké (début) : ", code.substring(0, 50) + "...");
-        })
-        .catch(err => {
-            alert("❌ Erreur de téléchargement : " + err);
-            console.error(err);
-        });
+    console.log("⬇️ Téléchargement des outils de test...");
+
+    /* Téléchargement en parallèle */
+    Promise.all(FILES.map(file => 
+        fetch(BASE_URL + file.name)
+            .then(res => {
+                if (!res.ok) throw new Error(`Erreur ${res.status} sur ${file.name}`);
+                return res.text();
+            })
+            .then(code => {
+                localStorage.setItem(file.storageKey, code);
+                return `${file.name} (v${code.length})`;
+            })
+    ))
+    .then(results => {
+        alert(`✅ Succès !\nMis à jour :\n- ${results.join('\n- ')}`);
+    })
+    .catch(err => {
+        alert("❌ Erreur de mise à jour : " + err.message);
+        console.error(err);
+    });
 })();
