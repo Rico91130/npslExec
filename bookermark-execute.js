@@ -1,4 +1,4 @@
-(function(){
+javascript:(function(){
     /* 1. RECUPERATION & INJECTION DU MOTEUR */
     const engineCode = localStorage.getItem('MON_MOTEUR_TEST');
     
