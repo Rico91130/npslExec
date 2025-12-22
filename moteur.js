@@ -1,141 +1,100 @@
 /**
- * MOTEUR DE TEST - VERSION 2.0 (Compatible JSON Brouillon)
+ * DASHBOARD DE CONFIGURATION
+ * S'injecte sur la page d'accueil pour préparer le test.
  */
-console.log("🔧 Initialisation du Moteur de Test v2...");
+(function() {
+    // 1. Nettoyage violent de la page
+    document.body.innerHTML = '';
+    document.body.style.backgroundColor = '#f0f0f0';
+    document.body.style.fontFamily = 'Marianne, sans-serif';
 
-window.FormulaireTester = {
-    
-    /**
-     * Point d'entrée principal
-     * Accepte soit un scénario simple, soit un JSON complet de brouillon
-     */
-    run: async function(rawData) {
-        console.log("🚀 Préparation des données...");
-        const scenario = this.prepareData(rawData);
+    // 2. Construction de l'IHM
+    const container = document.createElement('div');
+    container.style.cssText = 'max-width: 800px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+
+    container.innerHTML = `
+        <h1 style="color:#000091; margin-bottom: 20px;">⚡ Configuration du Test Automatisé</h1>
         
-        console.log(`▶️ Démarrage de l'exécution (${Object.keys(scenario).length} champs identifiés)...`);
+        <div style="margin-bottom: 20px; padding: 15px; background: #e8edff; border-left: 4px solid #000091;">
+            <strong>Étape 1 :</strong> Chargez votre fichier de scénario (JSON ou Brouillon).
+        </div>
+
+        <input type="file" id="jsonInput" accept=".json" style="margin-bottom: 10px; padding: 10px; width: 100%;">
         
-        let successCount = 0;
-        let ignoredCount = 0;
-        
-        for (const [key, val] of Object.entries(scenario)) {
-            // On ignore les valeurs vides ou nulles du brouillon
-            if (val === null || val === "") {
-                ignoredCount++;
-                continue;
+        <label style="display:block; margin-top:10px; font-weight:bold;">Contenu du scénario (Modifiable) :</label>
+        <textarea id="jsonPreview" style="width:100%; height:300px; font-family:monospace; margin-bottom: 20px; border:1px solid #ccc; padding:10px;"></textarea>
+
+        <div id="actions" style="text-align:right; border-top: 1px solid #eee; padding-top: 20px;">
+            <button id="btnLaunch" disabled style="background-color: #000091; color: white; padding: 12px 24px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; opacity: 0.5;">
+                Ouvrir la démarche &rarr;
+            </button>
+        </div>
+        <p id="errorMsg" style="color:red; display:none;"></p>
+    `;
+
+    document.body.appendChild(container);
+
+    // 3. Logique
+    const input = document.getElementById('jsonInput');
+    const textarea = document.getElementById('jsonPreview');
+    const btn = document.getElementById('btnLaunch');
+    const errorMsg = document.getElementById('errorMsg');
+
+    // Chargement fichier
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                // Formattage joli du JSON
+                const obj = JSON.parse(evt.target.result);
+                textarea.value = JSON.stringify(obj, null, 4);
+                textarea.dispatchEvent(new Event('input')); // Déclenche la validation
+            } catch(err) {
+                alert("JSON Invalide");
             }
+        };
+        reader.readAsText(file);
+    };
 
-            // Exécution
-            const result = await this.tryFill(key, val);
-            if (result === 'OK') successCount++;
-            else if (result === 'IGNORED') ignoredCount++;
-        }
-        
-        alert(`Terminé !\n✅ Succès : ${successCount}\nignorer/Invisibles : ${ignoredCount}`);
-    },
-
-    /**
-     * Transforme le JSON brut (Brouillon) en format plat pour le test
-     */
-    prepareData: function(input) {
-        // 1. Si c'est un brouillon complet, on prend la partie "donnees"
-        let data = input.donnees ? input.donnees : input;
-        let cleanScenario = {};
-
-        for (const [key, val] of Object.entries(data)) {
-            let cleanKey = key;
-            let cleanVal = val;
-
-            // RÈGLE 1 : Gestion des listes (Priorité au Libellé)
-            // Si on trouve "monChamp_libelle", on l'utilise pour remplir "monChamp"
-            if (key.endsWith('_libelle')) {
-                cleanKey = key.replace('_libelle', '');
-            } 
-            // Si c'est une valeur technique associée à un libellé existant, on l'ignore
-            // (car on préfère remplir via le libellé pour les selects Angular)
-            else if (key.endsWith('_valeur') && data[key.replace('_valeur', '_libelle')]) {
-                continue; 
-            }
-
-            // RÈGLE 2 : Conversion "true"/"false" string en booléen
-            if (cleanVal === "true") cleanVal = true;
-            if (cleanVal === "false") cleanVal = false;
-
-            cleanScenario[cleanKey] = cleanVal;
-        }
-        return cleanScenario;
-    },
-
-    tryFill: function(key, val, attempt = 1) {
-        return new Promise((resolve) => {
-            // Sélecteurs
-            const container = document.querySelector(`[data-clef="${key}"], [data-testid="${key}"]`);
-            let field = container ? container.querySelector('input, select, textarea') : null;
-            if (!field) field = document.querySelector(`#${key}, [name="${key}"]`);
-
-            if (field) {
-                // Si le champ est visible, on le remplit
-                if (field.offsetParent === null) {
-                   // Champ présent mais caché (ex: condition non remplie) -> On skip rapidement
-                   // console.log(`Existing but hidden: ${key}`);
-                   resolve('IGNORED'); 
-                   return;
-                }
-
-                if (this.fillField(field, val)) {
-                    console.log(`✅ [OK] ${key} = ${val}`);
-                    setTimeout(() => resolve('OK'), 200); // Pause Angular
-                } else {
-                    resolve('KO');
-                }
-            } else {
-                // Champ introuvable (peut-être une métadonnée ou une page suivante)
-                // On insiste moins que la v1 (3 essais max) pour ne pas bloquer sur les métadonnées du brouillon
-                if (attempt < 3) { 
-                    setTimeout(() => this.tryFill(key, val, attempt + 1).then(resolve), 300);
-                } else {
-                    // C'est probablement une donnée technique (ex: codeInsee) sans champ associé
-                    // console.log(`ℹ️ [SKIP] ${key} (non visuel)`);
-                    resolve('IGNORED');
-                }
-            }
-        });
-    },
-
-    fillField: function(el, val) {
+    // Validation & Extraction Code Démarche
+    textarea.oninput = () => {
         try {
-            el.focus();
-            const tag = el.tagName.toLowerCase();
-            const type = el.type ? el.type.toLowerCase() : '';
-
-            // CASE A COCHER / RADIO
-            if (type === 'checkbox' || type === 'radio') {
-                if (el.checked !== val) el.click();
-                return true;
-            } 
-            // LISTE DEROULANTE
-            else if (tag === 'select') {
-                let found = false;
-                for (let i = 0; i < el.options.length; i++) {
-                    // Match large (includes) pour gérer les libellés approximatifs
-                    if (el.options[i].text.includes(val)) {
-                        el.selectedIndex = i;
-                        found = true;
-                        break;
+            const data = JSON.parse(textarea.value);
+            // Sauvegarde dans localStorage pour la suite
+            localStorage.setItem('TEST_SCENARIO', JSON.stringify(data));
+            
+            // Tentative de trouver le code démarche (souvent à la racine ou déduit)
+            // Dans votre exemple pvpp.json : "codeDemarche": "PVPP"
+            // Dans le brouillon : non présent, il faut le deviner ou le demander.
+            let code = data.codeDemarche || data.donnees?.codeDemarche;
+            
+            if(code) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.onclick = () => {
+                    const url = `https://demarches.service-public.gouv.fr/mademarche/demarcheGenerique/?codeDemarche=${code}`;
+                    window.location.href = url;
+                };
+                errorMsg.style.display = 'none';
+            } else {
+                // Fallback si pas de code démarche dans le JSON
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.innerText = "Lancer (Code démarche inconnu)";
+                btn.onclick = () => {
+                    const codeManuel = prompt("Code démarche non trouvé dans le JSON. Entrez le code (ex: PVPP) :");
+                    if(codeManuel) {
+                        window.location.href = `https://demarches.service-public.gouv.fr/mademarche/demarcheGenerique/?codeDemarche=${codeManuel}`;
                     }
-                }
-                if (found) el.dispatchEvent(new Event('change', { bubbles: true }));
-                return found;
-            } 
-            // CHAMP TEXTE
-            else {
-                el.value = val;
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                el.blur();
-                return true;
+                };
             }
-        } catch (e) { return false; }
-    }
-};
-console.log("✅ Moteur v2 (Support Brouillon) chargé !");
+        } catch(e) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            errorMsg.innerText = "JSON invalide : " + e.message;
+            errorMsg.style.display = 'block';
+        }
+    };
+})();
