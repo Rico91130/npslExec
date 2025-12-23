@@ -17,76 +17,84 @@ window.FormulaireTester = {
         {
             id: 'AdresseBanOuManuelle_SaisieManuelle',
             matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
-            
+
             isActive: (key, fullData) => {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
             },
 
             getIgnoredKeys: (key) => {
-                const base = key.replace('_nomLong', ''); 
+                const base = key.replace('_nomLong', '');
                 return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
-                       .map(suffix => base + suffix);
+                    .map(suffix => base + suffix);
             },
 
-            customFill: async function(key, value, fullData, engine) {
+            customFill: async function (key, value, fullData, engine) {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
-                const inputTargetKey = key.replace('_nomLong', ''); 
+                const inputTargetKey = key.replace('_nomLong', '');
 
-                // --- ETAPE 1 : La Checkbox ---
+                // 1. Checkbox
                 const checkboxEl = engine.findElement(checkboxKey);
                 if (checkboxEl && !checkboxEl.checked) {
                     engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
                     checkboxEl.click();
-                    return 'PENDING'; // On attend que le DOM réagisse au clic
+                    return 'PENDING';
                 }
 
-                // --- ETAPE 2 : Calcul de la valeur ---
+                // 2. Calcul Valeur
                 const cp = fullData[`${prefix}_communeActuelleAdresseManuelle_codePostal`];
                 const nom = fullData[`${prefix}_communeActuelleAdresseManuelle_nom`];
-                let textToType = value; // Fallback
-                if (cp && nom) textToType = `${cp} ${nom}`; // "80000 AMIENS"
+                let textToType = value;
+                if (cp && nom) textToType = `${cp} ${nom}`;
 
                 const inputEl = engine.findElement(inputTargetKey);
-                
+
                 if (inputEl) {
-                    // --- ETAPE 3 : Sélection dans la liste (Prioritaire) ---
-                    // On regarde si des options d'autocomplétion sont affichées
-                    // Note: Angular Material place les mat-option hors du formulaire, souvent à la fin du body
-                    const options = document.querySelectorAll('mat-option');
-                    
-                    if (options.length > 0) {
-                        engine.log(`[Stratégie] Clic sur la 1ère suggestion (${options.length} trouvées)`, 'point_up');
-                        // On clique sur le premier élément visible
-                        options[0].click();
-                        return 'OK'; // C'est gagné, on a cliqué
+                    // 3. CHECKPRIORITAIRE : La liste d'options
+                    // On ne prend que les options visibles (pour éviter de cliquer sur des vieux overlays cachés)
+                    const allOptions = document.querySelectorAll('mat-option');
+                    // Filtre simple pour voir si visible (offsetParent n'est pas null)
+                    const visibleOptions = Array.from(allOptions).filter(opt => opt.offsetParent !== null);
+
+                    if (visibleOptions.length > 0) {
+                        engine.log(`[Stratégie] Clic sur la 1ère suggestion (${visibleOptions.length} visibles)`, 'point_up');
+
+                        // Petite sécurité : on s'assure que le texte correspond à ce qu'on cherche 
+                        // (optionnel, mais évite de cliquer sur n'importe quoi si la liste précédente traine)
+                        if (visibleOptions[0].innerText.includes(nom) || visibleOptions[0].innerText.includes(cp)) {
+                            visibleOptions[0].click();
+                            return 'OK'; // C'est FINI seulement quand on a cliqué
+                        }
                     }
 
-                    // --- ETAPE 2 (Suite) : Saisie du texte ---
-                    // Si la valeur n'est pas encore saisie, on tape
+                    // 4. Saisie du texte
                     if (inputEl.value !== textToType) {
-                        engine.log(`[Stratégie] Saisie pour autocomplétion : "${textToType}"`, '⌨️');
-                        
-                        // Saisie brute
+                        engine.log(`[Stratégie] Saisie : "${textToType}"`, '⌨️');
                         engine.fillField(inputEl, textToType);
-                        
-                        // Force le focus pour réveiller Angular Material
+
+                        // Forcer le focus est CRUCIAL pour Angular Material
+                        inputEl.focus();
                         inputEl.dispatchEvent(new Event('focus', { bubbles: true }));
                         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                        
-                        return 'PENDING'; // On attend que la liste apparaisse suite à la saisie
+
+                        return 'PENDING';
                     }
 
-                    // Cas limite : Le texte est saisi, mais pas de liste ?
-                    // Si on est là, c'est que inputEl.value === textToType MAIS options.length === 0.
-                    // Soit la liste n'est pas encore apparue (PENDING), soit on a déjà cliqué (OK).
-                    // Dans le doute, si le champ est rempli, on peut considérer que c'est OK ou attendre un peu.
-                    // Pour éviter de bloquer, si c'est rempli, on valide.
-                    return 'OK'; 
+                    // 5. ETAT D'ATTENTE (Le correctif est ici)
+                    // Le texte est bon, MAIS on n'a pas encore cliqué (sinon on serait sorti au point 3).
+                    // On force le moteur à repasser ici tant que la liste n'est pas apparue.
+
+                    // On remet le focus au cas où l'utilisateur (ou le script) l'ait perdu
+                    if (document.activeElement !== inputEl) {
+                        inputEl.focus();
+                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+
+                    return 'PENDING';
                 }
 
-                return 'ABSENT'; 
+                return 'ABSENT';
             }
         }
     ],
