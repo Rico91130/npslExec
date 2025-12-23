@@ -76,17 +76,6 @@ window.FormulaireTester = {
                                  targetOption.dispatchEvent(mouseEvent);
                              });
 
-                             // 2. Ceinture et Bretelles : Forçage de la valeur
-                             // Parfois le clic met à jour le modèle interne mais l'input lag
-                             // On force la valeur affichée pour être sûr que la validation passe
-                             if (inputEl.value !== targetText) {
-                                 engine.log(`[Stratégie] Correction valeur input -> "${targetText}"`, '🔧');
-                                 inputEl.value = targetText;
-                                 // On redéclenche les events sur l'input pour qu'il sache qu'il a changé
-                                 inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                                 inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-                                 inputEl.blur(); // On quitte le champ pour fermer la liste proprement
-                             }
 
                              return 'OK'; 
                         }
