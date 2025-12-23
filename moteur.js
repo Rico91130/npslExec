@@ -109,12 +109,7 @@ window.FormulaireTester = {
             
             // 1. Résolution de la Stratégie
             const activeStrategy = this.findStrategy(jsonKey, scenario.donnees || scenario);
-            
-            // --- CORRECTION V5.1 ---
-            // On supprime la vérification "isKeyLikelyVisible" qui empêchait 
-            // d'attendre l'apparition des champs conditionnels.
-            // On tente systématiquement le remplissage.
-            
+                       
             let result;
 
             if (activeStrategy && activeStrategy.customFill) {
@@ -123,6 +118,7 @@ window.FormulaireTester = {
             } else {
                 // -> REMPLISSAGE STANDARD
                 // C'est "tryFill" qui s'occupera d'attendre (retry) si le champ n'est pas encore là.
+                console.log(jsonKey);
                 result = await this.tryFill(jsonKey, val);
             }
             
