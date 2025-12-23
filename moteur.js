@@ -58,13 +58,37 @@ window.FormulaireTester = {
                     const visibleOptions = Array.from(allOptions).filter(opt => opt.offsetParent !== null);
 
                     if (visibleOptions.length > 0) {
-                        engine.log(`[Stratégie] Clic sur la 1ère suggestion (${visibleOptions.length} visibles)`, 'point_up');
+                        const targetOption = visibleOptions[0];
+                        const targetText = targetOption.innerText.trim(); // ex: "AMIENS (80000)"
 
-                        // Petite sécurité : on s'assure que le texte correspond à ce qu'on cherche 
-                        // (optionnel, mais évite de cliquer sur n'importe quoi si la liste précédente traine)
-                        if (visibleOptions[0].innerText.includes(nom) || visibleOptions[0].innerText.includes(cp)) {
-                            visibleOptions[0].click();
-                            return 'OK'; // C'est FINI seulement quand on a cliqué
+                        // Petite sécurité pour ne pas cliquer n'importe où
+                        if(targetText.includes(nom) || targetText.includes(cp)) {
+                             engine.log(`[Stratégie] Sélection de "${targetText}"`, 'point_up');
+
+                             // 1. Simulation d'un clic "Humain" (Mousedown est CRUCIAL pour Angular Material)
+                             // Angular Material attend souvent mousedown pour initier la sélection
+                             ['mousedown', 'mouseup', 'click'].forEach(evtType => {
+                                 const mouseEvent = new MouseEvent(evtType, {
+                                     bubbles: true,
+                                     cancelable: true,
+                                     view: window
+                                 });
+                                 targetOption.dispatchEvent(mouseEvent);
+                             });
+
+                             // 2. Ceinture et Bretelles : Forçage de la valeur
+                             // Parfois le clic met à jour le modèle interne mais l'input lag
+                             // On force la valeur affichée pour être sûr que la validation passe
+                             if (inputEl.value !== targetText) {
+                                 engine.log(`[Stratégie] Correction valeur input -> "${targetText}"`, '🔧');
+                                 inputEl.value = targetText;
+                                 // On redéclenche les events sur l'input pour qu'il sache qu'il a changé
+                                 inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                                 inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                                 inputEl.blur(); // On quitte le champ pour fermer la liste proprement
+                             }
+
+                             return 'OK'; 
                         }
                     }
 
