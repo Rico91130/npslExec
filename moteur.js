@@ -1,113 +1,194 @@
 /**
- * MOTEUR V3.3 - Gestion Temporisation + Apparitions dynamiques + Composants Riches (Inférence)
+ * MOTEUR V5.0 - Stratégies Avancées avec "Custom Fill" (Gestion des Composants Riches)
  */
 window.FormulaireTester = {
-    // Configuration globale
+    
+    // --- 1. CONFIGURATION & STRATÉGIES ---
+    
     config: {
-        verbose: false,      // Logs détaillés
-        stepDelay: 300,      // Pause SYSTÉMATIQUE après chaque remplissage (ms)
-        retryAttempts: 10,   // Combien de fois on cherche un champ manquant
-        retryInterval: 200   // Temps entre deux recherches (ms) -> Total max = 2 sec
+        verbose: true,       // Utile pour debugger les composants riches
+        stepDelay: 300,      // Pause après action
+        retryAttempts: 10,
+        retryInterval: 200
     },
+
+    /**
+     * REGISTRE DES STRATÉGIES (C'est ici qu'on externalise la logique métier)
+     */
+    strategies: [
+        {
+            id: 'AdresseBanOuManuelle_SaisieManuelle',
+            description: 'Gère le composant Adresse en mode manuel (Check + Remplissage Commune)',
+            
+            // 1. DÉTECTION : On s'active si la clé est le "Nom Long" d'une commune manuelle
+            matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
+            
+            // 2. ACTIVATION : On vérifie si le flag "utiliserAdresseManuelle" est à TRUE dans les données
+            isActive: (key, fullData) => {
+                const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
+                return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
+            },
+
+            // 3. NETTOYAGE : On supprime les clés techniques parasites du JSON
+            getIgnoredKeys: (key) => {
+                const base = key.replace('_nomLong', ''); 
+                // On garde la main sur le remplissage, on ignore les sous-clés techniques
+                return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
+                       .map(suffix => base + suffix);
+            },
+
+            // 4. ACTION PERSONNALISÉE (Le coeur de ta demande)
+            // Au lieu de laisser le moteur faire un simple fillField, on prend le contrôle.
+            customFill: async function(key, value, fullData, engine) {
+                // A. Reconstitution des clés
+                const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
+                const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
+                const inputTargetKey = key.replace('_nomLong', ''); // La clé du champ input (data-clef)
+
+                engine.log(`[Stratégie Adresse] Activation pour ${prefix}`, '🏠');
+
+                // B. Gestion de la Case à cocher (Pré-requis)
+                // On cherche la case à cocher via sa clé
+                const checkboxEl = engine.findElement(checkboxKey);
+                if (checkboxEl && !checkboxEl.checked) {
+                    engine.log(`[Stratégie Adresse] Clic forcé sur la case 'Adresse Manuelle'`, '☑️');
+                    checkboxEl.click();
+                    // Petit délai pour laisser le temps au DOM d'afficher les champs manuels (Angular/React)
+                    await engine.sleep(500); 
+                }
+
+                // C. Recherche du champ Input Commune
+                // On utilise la méthode standard du moteur pour bénéficier du Retry
+                let inputEl = null;
+                for(let i=0; i<5; i++) { // Mini boucle de retry interne
+                    inputEl = engine.findElement(inputTargetKey);
+                    if(inputEl && inputEl.offsetParent !== null) break;
+                    await engine.sleep(200);
+                }
+
+                if (!inputEl) {
+                    console.warn(`[Stratégie Adresse] Champ commune introuvable : ${inputTargetKey}`);
+                    return 'ABSENT';
+                }
+
+                // D. Remplissage avec la valeur du _nomLong
+                engine.log(`[Stratégie Adresse] Remplissage Commune avec "${value}"`, '✍️');
+                const success = engine.fillField(inputEl, value);
+                return success ? 'OK' : 'KO';
+            }
+        }
+    ],
+
+
+    // --- 2. NOYAU DU MOTEUR ---
 
     log: function(msg, emoji = 'ℹ️', data = null) {
         if (this.config.verbose) {
             const prefix = `%c[TESTER] ${emoji}`;
             const style = 'color: #cd094f; font-weight: bold;';
-            if (data) console.log(prefix + ' ' + msg, style, data);
-            else console.log(prefix + ' ' + msg, style);
+            console.log(`${prefix} ${msg}`, style, data || '');
         }
     },
 
-    /**
-     * Utilitaire de pause (Promise)
-     */
     sleep: function(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     },
 
+    /**
+     * Point d'entrée principal
+     */
     runPage: async function(scenario) {
-        // C'est ici que le nettoyage des données se fait
         const data = this.prepareData(scenario);
         let actionCount = 0;
 
-        // 1. Première analyse de la page
+        // Snapshot initial
         let visibleSnapshot = this.scanVisibleKeys();
-        this.log(`Analyse initiale : ${visibleSnapshot.size} champs visibles.`, '🔍');
+        this.log(`Analyse initiale : ${visibleSnapshot.size} champs détectés.`, '🔍');
 
-        for (const [key, val] of Object.entries(data)) {
-            // 2. Vérification de visibilité (basée sur le snapshot courant)
-            // Note: On vérifie toujours la visibilité, même pour les champs filtrés
-            const isVisible = this.isKeyLikelyVisible(key, visibleSnapshot);
+        for (const [jsonKey, val] of Object.entries(data)) {
+            
+            // 1. Résolution de la Stratégie
+            const activeStrategy = this.findStrategy(jsonKey, scenario.donnees || scenario);
+            
+            // Calcul de la clé de visibilité (soit la clé JSON, soit une clé cible si la stratégie le dit)
+            // Pour le customFill, on estime que la clé principale est celle à vérifier
+            let checkVisiblityKey = jsonKey; 
+            
+            // Petite astuce : si on a une stratégie custom, on suppose que c'est visible ou que la stratégie gère l'attente
+            const isVisible = activeStrategy ? true : this.isKeyLikelyVisible(checkVisiblityKey, visibleSnapshot);
             
             if (isVisible) {
-                const result = await this.tryFill(key, val);
+                let result;
+
+                if (activeStrategy && activeStrategy.customFill) {
+                    // -> DÉLÉGATION À LA STRATÉGIE
+                    result = await activeStrategy.customFill(jsonKey, val, (scenario.donnees || scenario), this);
+                } else {
+                    // -> REMPLISSAGE STANDARD
+                    result = await this.tryFill(jsonKey, val);
+                }
                 
                 if (result === 'OK') {
                     actionCount++;
-                    this.log(`Succès pour '${key}'`, '✅');
-
-                    // Mise à jour du snapshot après une action réussie (apparition potentielle de nouveaux champs)
+                    if(!activeStrategy) this.log(`Succès pour '${jsonKey}'`, '✅'); // Log standard
                     visibleSnapshot = this.scanVisibleKeys(); 
-                    
+                    await this.sleep(this.config.stepDelay);
                 } else if (result === 'SKIPPED') {
-                    this.log(`Ignoré '${key}' (Déjà rempli)`, '⏭️');
+                    this.log(`Ignoré '${jsonKey}' (Déjà fait)`, '⏭️');
                 }
             }
         }
-        
         return actionCount;
     },
 
     /**
-     * Recherche un élément dans le DOM
+     * Trouve la stratégie applicable pour une clé donnée
      */
-    findElement: function(key) {
-        const container = document.querySelector(`[data-clef="${key}"], [data-testid="${key}"]`);
-        let field = container ? container.querySelector('input, select, textarea') : null;
-        if (!field) field = document.querySelector(`#${key}, [name="${key}"]`);
-        return field;
+    findStrategy: function(key, fullData) {
+        // Normalisation rapide pour les checks booléens
+        const normalizedData = this.normalizeBooleans(fullData);
+        return this.strategies.find(s => s.matches(key) && s.isActive(key, normalizedData));
     },
 
     /**
-     * Tente de remplir un champ avec mécanisme de RÉESSAI (Retry)
+     * Prépare les données et nettoie via les stratégies
      */
-    tryFill: async function(key, val) {
-        let field = null;
+    prepareData: function(input) {
+        let rawData = input.donnees ? input.donnees : input;
+        let clean = {};
+        const fullRawData = this.normalizeBooleans(rawData);
 
-        // BOUCLE DE RETRY
-        for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
-            field = this.findElement(key);
-
-            // Condition de sortie : Champ trouvé ET visible
-            if (field && field.offsetParent !== null) {
-                break;
+        // Identification des clés à ignorer
+        let keysToIgnore = new Set();
+        Object.keys(fullRawData).forEach(key => {
+            const strategy = this.findStrategy(key, fullRawData);
+            if (strategy && strategy.getIgnoredKeys) {
+                strategy.getIgnoredKeys(key).forEach(k => keysToIgnore.add(k));
             }
+        });
 
-            // Si pas trouvé, on attend un peu (sauf au dernier essai)
-            if (attempt < this.config.retryAttempts) {
-                if(attempt === 1 && this.config.verbose) this.log(`Attente apparition '${key}'...`, '⏳');
-                await this.sleep(this.config.retryInterval);
-            }
-        }
+        for (const [key, val] of Object.entries(fullRawData)) {
+            if (val === null || val === "") continue;
+            if (keysToIgnore.has(key)) continue;
 
-        if (field && field.offsetParent !== null) {
-            // Vérification si déjà rempli
-            if (this.isValueAlreadySet(field, val)) {
-                 return 'SKIPPED';
-            }
+            let finalKey = key;
+            if (key.endsWith('_libelle')) finalKey = key.replace('_libelle', '');
+            if (key.endsWith('_valeur') && fullRawData[key.replace('_valeur', '_libelle')]) continue;
             
-            // Remplissage effectif
-            if (this.fillField(field, val)) {
-                await this.sleep(this.config.stepDelay);
-                return 'OK';
-            } else {
-                return 'KO';
-            }
-        } else {
-            return 'ABSENT';
+            clean[finalKey] = val;
         }
+        return clean;
     },
+
+    normalizeBooleans: function(data) {
+        const out = {};
+        for(const [k, v] of Object.entries(data)) {
+            out[k] = (v === "true" || v === true) ? true : ((v === "false" || v === false) ? false : v);
+        }
+        return out;
+    },
+
+    // --- 3. DOM & INTERACTION (Standard) ---
 
     scanVisibleKeys: function() {
         const set = new Set();
@@ -121,79 +202,39 @@ window.FormulaireTester = {
     },
 
     isKeyLikelyVisible: function(key, set) {
-        // 1. Exact match
         if (set.has(key)) return true;
-        
-        // 2. Dépendance probable
         for (let visibleKey of set) {
             if (key.startsWith(visibleKey)) return true;
         }
-        
-        // 3. Si le set est vide (page vierge chargée), on tente tout
-        if (set.size === 0) return true;
-
+        if (set.size === 0) return true; // Page vierge au chargement
         return false;
     },
 
-    /**
-     * Prépare et nettoie les données (Inclus la gestion des Composants Riches)
-     */
-    prepareData: function(input) {
-        let rawData = input.donnees ? input.donnees : input;
-        let clean = {};
+    findElement: function(key) {
+        // Priorité 1 : data-clef exact (Le plus robuste pour ton app)
+        const container = document.querySelector(`[data-clef="${key}"]`);
+        if (container) {
+            if (['input','select','textarea'].includes(container.tagName.toLowerCase())) return container;
+            return container.querySelector('input, select, textarea');
+        }
+        // Priorité 2 : Attributs standards
+        return document.querySelector(`#${key}, [name="${key}"]`);
+    },
 
-        // ÉTAPE 1 : Nettoyage standard (Libellés, Valeurs, Booléens)
-        for (const [key, val] of Object.entries(rawData)) {
-            if (val === null || val === "") continue;
-            
-            // Gestion suffixe _libelle / _valeur
-            let k = key.endsWith('_libelle') ? key.replace('_libelle', '') : key;
-            if (key.endsWith('_valeur') && rawData[key.replace('_valeur', '_libelle')]) continue;
-            
-            // Conversion booléens string -> boolean réel
-            let v = val === "true" ? true : (val === "false" ? false : val);
-            
-            clean[k] = v;
+    tryFill: async function(key, val) {
+        let field = null;
+        for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
+            field = this.findElement(key);
+            if (field && field.offsetParent !== null) break;
+            if (attempt < this.config.retryAttempts) await this.sleep(this.config.retryInterval);
         }
 
-        // ÉTAPE 2 : Gestion des Composants Riches (Inférence)
-        // On repasse sur les données propres pour supprimer les champs techniques parasites
-        const keysToDelete = [];
-        
-        Object.keys(clean).forEach(key => {
-            // Si on détecte un champ "Maître" (ex: _nomLong pour une commune)
-            if (key.endsWith('_nomLong')) {
-                const prefix = key.replace('_nomLong', '');
-                
-                // Liste des suffixes techniques à supprimer si le maître est présent
-                const technicalSuffixes = [
-                    '_nom', 
-                    '_codePostal', 
-                    '_codeInsee', 
-                    '_codeInseeDepartement', 
-                    '_typeProtection', 
-                    '_nomProtecteur', 
-                    '_idProtecteur', 
-                    '_id'
-                ];
-
-                technicalSuffixes.forEach(suffix => {
-                    const techKey = prefix + suffix;
-                    // Si la clé technique existe, on la marque pour suppression
-                    if (clean[techKey] !== undefined) {
-                        keysToDelete.push(techKey);
-                    }
-                });
-            }
-        });
-
-        // Suppression effective
-        keysToDelete.forEach(k => {
-            if(this.config.verbose) console.log(`[RichComponent] Suppression automatique de la clé technique : ${k}`);
-            delete clean[k];
-        });
-
-        return clean;
+        if (field && field.offsetParent !== null) {
+            if (this.isValueAlreadySet(field, val)) return 'SKIPPED';
+            if (this.fillField(field, val)) return 'OK';
+            return 'KO';
+        }
+        return 'ABSENT';
     },
 
     isValueAlreadySet: function(el, val) {
@@ -215,15 +256,12 @@ window.FormulaireTester = {
                     if (el.options[i].text.includes(val)) {
                         el.selectedIndex = i;
                         found = true;
-                        this.log(`Select '${el.name||el.id}' -> "${el.options[i].text}"`, '🔽');
                         break;
                     }
                 }
                 if (found) el.dispatchEvent(new Event('change', { bubbles: true }));
-                else this.log(`Option "${val}" introuvable`, '⚠️');
             } else {
                 el.value = val;
-                // Dispatch events essentiels pour les frameworks JS
                 el.dispatchEvent(new Event('input', { bubbles: true }));
                 el.dispatchEvent(new Event('change', { bubbles: true }));
             }
