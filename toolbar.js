@@ -43,6 +43,10 @@
                 Auto-Suivant
             </label>
             
+            <button id="btnSnapshot" style="background:#333; color:#eee; border:1px solid #555; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px; display:flex; align-items:center; gap:5px;">
+                📸 HTML
+            </button>
+
             <div style="width:1px; height:20px; background:#555; margin:0 5px;"></div>
             
             <button id="btnRunPage" style="background:#000091; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">
@@ -55,13 +59,41 @@
 
     // 2. Logique
     const btnRun = document.getElementById('btnRunPage');
+    const btnSnapshot = document.getElementById('btnSnapshot'); // Nouveau
     const chkAutoNext = document.getElementById('chkAutoNext');
-    const chkLogs = document.getElementById('chkLogs'); // Nouveau
+    const chkLogs = document.getElementById('chkLogs');
     const status = document.getElementById('status-text');
 
     let isRunning = false;
 
-    // Listener pour les logs
+    // --- Fonction Snapshot ---
+    const downloadSnapshot = () => {
+        try {
+            const fullHTML = document.documentElement.outerHTML;
+            const blob = new Blob([fullHTML], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `snapshot_dom_${Date.now()}.html`;
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            console.log("[TOOLBAR] Snapshot HTML téléchargé.");
+            status.innerText = "📸 HTML sauvegardé !";
+            setTimeout(() => { if(!isRunning) status.innerText = "Prêt"; }, 2000);
+        } catch (e) {
+            console.error("Erreur Snapshot:", e);
+            alert("Erreur lors du téléchargement : " + e.message);
+        }
+    };
+
+    // Listeners
+    btnSnapshot.onclick = downloadSnapshot;
+
     chkLogs.onchange = () => {
         if(window.FormulaireTester) {
             window.FormulaireTester.config.verbose = chkLogs.checked;
