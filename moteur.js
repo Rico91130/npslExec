@@ -1,5 +1,5 @@
 /**
- * MOTEUR V3.2 - Gestion de la Temporisation et des Apparitions dynamiques
+ * MOTEUR V3.3 - Gestion Temporisation + Apparitions dynamiques + Composants Riches (Inférence)
  */
 window.FormulaireTester = {
     // Configuration globale
@@ -27,6 +27,7 @@ window.FormulaireTester = {
     },
 
     runPage: async function(scenario) {
+        // C'est ici que le nettoyage des données se fait
         const data = this.prepareData(scenario);
         let actionCount = 0;
 
@@ -36,6 +37,7 @@ window.FormulaireTester = {
 
         for (const [key, val] of Object.entries(data)) {
             // 2. Vérification de visibilité (basée sur le snapshot courant)
+            // Note: On vérifie toujours la visibilité, même pour les champs filtrés
             const isVisible = this.isKeyLikelyVisible(key, visibleSnapshot);
             
             if (isVisible) {
@@ -45,6 +47,7 @@ window.FormulaireTester = {
                     actionCount++;
                     this.log(`Succès pour '${key}'`, '✅');
 
+                    // Mise à jour du snapshot après une action réussie (apparition potentielle de nouveaux champs)
                     visibleSnapshot = this.scanVisibleKeys(); 
                     
                 } else if (result === 'SKIPPED') {
@@ -72,7 +75,7 @@ window.FormulaireTester = {
     tryFill: async function(key, val) {
         let field = null;
 
-        // BOUCLE DE RETRY (C'est ici qu'on gère l'apparition retardée)
+        // BOUCLE DE RETRY
         for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
             field = this.findElement(key);
 
@@ -83,7 +86,6 @@ window.FormulaireTester = {
 
             // Si pas trouvé, on attend un peu (sauf au dernier essai)
             if (attempt < this.config.retryAttempts) {
-                // On ne loggue l'attente que si on est en mode verbeux pour ne pas polluer
                 if(attempt === 1 && this.config.verbose) this.log(`Attente apparition '${key}'...`, '⏳');
                 await this.sleep(this.config.retryInterval);
             }
@@ -122,10 +124,9 @@ window.FormulaireTester = {
         // 1. Exact match
         if (set.has(key)) return true;
         
-        // 2. Dépendance probable (ex: 'adresse' est visible, donc 'adresse_rue' peut l'être bientôt)
-        // On vérifie si un préfixe de la clé existe déjà dans les éléments visibles
+        // 2. Dépendance probable
         for (let visibleKey of set) {
-            if (key.startsWith(visibleKey)) return true; // ex: visibleKey='adresse', key='adresse_numero'
+            if (key.startsWith(visibleKey)) return true;
         }
         
         // 3. Si le set est vide (page vierge chargée), on tente tout
@@ -134,16 +135,64 @@ window.FormulaireTester = {
         return false;
     },
 
+    /**
+     * Prépare et nettoie les données (Inclus la gestion des Composants Riches)
+     */
     prepareData: function(input) {
-        let data = input.donnees ? input.donnees : input;
+        let rawData = input.donnees ? input.donnees : input;
         let clean = {};
-        for (const [key, val] of Object.entries(data)) {
+
+        // ÉTAPE 1 : Nettoyage standard (Libellés, Valeurs, Booléens)
+        for (const [key, val] of Object.entries(rawData)) {
             if (val === null || val === "") continue;
+            
+            // Gestion suffixe _libelle / _valeur
             let k = key.endsWith('_libelle') ? key.replace('_libelle', '') : key;
-            if (key.endsWith('_valeur') && data[key.replace('_valeur', '_libelle')]) continue;
+            if (key.endsWith('_valeur') && rawData[key.replace('_valeur', '_libelle')]) continue;
+            
+            // Conversion booléens string -> boolean réel
             let v = val === "true" ? true : (val === "false" ? false : val);
+            
             clean[k] = v;
         }
+
+        // ÉTAPE 2 : Gestion des Composants Riches (Inférence)
+        // On repasse sur les données propres pour supprimer les champs techniques parasites
+        const keysToDelete = [];
+        
+        Object.keys(clean).forEach(key => {
+            // Si on détecte un champ "Maître" (ex: _nomLong pour une commune)
+            if (key.endsWith('_nomLong')) {
+                const prefix = key.replace('_nomLong', '');
+                
+                // Liste des suffixes techniques à supprimer si le maître est présent
+                const technicalSuffixes = [
+                    '_nom', 
+                    '_codePostal', 
+                    '_codeInsee', 
+                    '_codeInseeDepartement', 
+                    '_typeProtection', 
+                    '_nomProtecteur', 
+                    '_idProtecteur', 
+                    '_id'
+                ];
+
+                technicalSuffixes.forEach(suffix => {
+                    const techKey = prefix + suffix;
+                    // Si la clé technique existe, on la marque pour suppression
+                    if (clean[techKey] !== undefined) {
+                        keysToDelete.push(techKey);
+                    }
+                });
+            }
+        });
+
+        // Suppression effective
+        keysToDelete.forEach(k => {
+            if(this.config.verbose) console.log(`[RichComponent] Suppression automatique de la clé technique : ${k}`);
+            delete clean[k];
+        });
+
         return clean;
     },
 
@@ -174,6 +223,7 @@ window.FormulaireTester = {
                 else this.log(`Option "${val}" introuvable`, '⚠️');
             } else {
                 el.value = val;
+                // Dispatch events essentiels pour les frameworks JS
                 el.dispatchEvent(new Event('input', { bubbles: true }));
                 el.dispatchEvent(new Event('change', { bubbles: true }));
             }
