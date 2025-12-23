@@ -1,20 +1,18 @@
 /**
- * MOTEUR V6.1 - Réactif (MutationObserver) + Gestion Arrêt (Stop)
+ * MOTEUR V7.0 - Architecture Événementielle (Global Observer)
+ * Logique inversée : On observe le DOM et on tire dans le tas dès qu'une cible apparaît.
  */
 window.FormulaireTester = {
     
-    // Flag de contrôle (piloté par la Toolbar)
-    abort: false,
+    abort: false, // Flag d'arrêt manuel
 
-    // --- 1. CONFIGURATION ---
-    
     config: {
         verbose: true,
-        stepDelay: 100,       // Délai esthétique
-        timeout: 3000         // Temps max d'attente (300ms était un peu court, je remets 3s par sécurité, ou tu peux mettre 300)
+        inactivityTimeout: 2000, // Temps de calme plat avant de considérer le test terminé
+        stepDelay: 50    // Délai minime pour laisser le moteur de rendu respirer
     },
 
-    // --- 2. STRATÉGIES (Composants Riches) ---
+    // --- STRATÉGIES (Adaptées pour ne pas bloquer le flux) ---
     strategies: [
         {
             id: 'AdresseBanOuManuelle_SaisieManuelle',
@@ -31,42 +29,37 @@ window.FormulaireTester = {
                        .map(suffix => base + suffix);
             },
 
+            // Dans la V7, customFill est appelé quand le DOM bouge. 
+            // Il doit être robuste et vérifier lui-même s'il peut avancer.
             customFill: async function(key, value, fullData, engine) {
-                // Check STOP avant de commencer une stratégie longue
-                if(engine.abort) return 'SKIPPED';
-
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
                 const inputTargetKey = key.replace('_nomLong', ''); 
 
-                engine.log(`[Stratégie Adresse] Activation pour ${prefix}`, '🏠');
-
-                // 1. Gestion Case à cocher
-                const checkboxEl = await engine.waitForElement(checkboxKey);
+                // 1. Checkbox
+                const checkboxEl = engine.findElement(checkboxKey);
+                // Si la checkbox est là mais pas cochée, on clique et ON S'ARRÊTE LÀ pour ce tour.
+                // Le clic va provoquer une mutation DOM qui relancera le moteur.
                 if (checkboxEl && !checkboxEl.checked) {
-                    engine.log(`[Stratégie Adresse] Clic sur 'Adresse Manuelle'`, '☑️');
+                    engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
                     checkboxEl.click();
+                    return 'PENDING'; // On signale qu'on a fait une action mais que ce n'est pas fini
                 }
 
-                // Check STOP pendant l'exécution
-                if(engine.abort) return 'SKIPPED';
-
-                // 2. Attente intelligente
-                const inputEl = await engine.waitForElement(inputTargetKey);
-
-                if (!inputEl) {
-                    console.warn(`[Stratégie Adresse] Timeout : Champ commune non apparu (${inputTargetKey})`);
-                    return 'ABSENT';
+                // 2. Input Commune
+                const inputEl = engine.findElement(inputTargetKey);
+                if (inputEl) {
+                    engine.log(`[Stratégie] Remplissage Commune`, '✍️');
+                    const success = engine.fillField(inputEl, value);
+                    return success ? 'OK' : 'KO';
                 }
 
-                engine.log(`[Stratégie Adresse] Remplissage Commune`, '✍️');
-                const success = engine.fillField(inputEl, value);
-                return success ? 'OK' : 'KO';
+                return 'ABSENT'; // On n'a rien pu faire pour l'instant
             }
         }
     ],
 
-    // --- 3. NOYAU DU MOTEUR (Réactif) ---
+    // --- NOYAU DU MOTEUR V7 ---
 
     log: function(msg, emoji = 'ℹ️', data = null) {
         if (this.config.verbose) {
@@ -74,108 +67,134 @@ window.FormulaireTester = {
         }
     },
 
-    sleep: function(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    },
-
-    waitForElement: function(key) {
-        return new Promise((resolve) => {
-            // Check immédiat
-            const existingEl = this.findElement(key);
-            if (existingEl && existingEl.offsetParent !== null) {
-                return resolve(existingEl);
-            }
-
-            // Si on a demandé l'arrêt, inutile d'attendre
-            if (this.abort) return resolve(null);
-
-            if(this.config.verbose) this.log(`Attente DOM pour '${key}'...`, '👀');
-
-            let observer;
-            let timer;
-
-            const cleanup = () => {
-                if(observer) observer.disconnect();
-                if(timer) clearTimeout(timer);
-            };
-
-            observer = new MutationObserver((mutations) => {
-                // Check Stop constant
-                if (this.abort) { cleanup(); return resolve(null); }
-
-                const hasAddedNodes = mutations.some(m => m.addedNodes.length > 0);
-                if (!hasAddedNodes) return;
-
-                const el = this.findElement(key);
-                if (el && el.offsetParent !== null) {
-                    cleanup();
-                    resolve(el);
-                }
-            });
-
-            observer.observe(document.body, { childList: true, subtree: true });
-
-            timer = setTimeout(() => {
-                cleanup();
-                resolve(null); 
-            }, this.config.timeout);
-        });
-    },
-
     /**
      * Point d'entrée principal
      */
-    runPage: async function(scenario) {
-        const data = this.prepareData(scenario);
-        let actionCount = 0;
-
-        this.log("Démarrage moteur V6.1 (Réactif + Stop)", "🚀");
-
-        for (const [jsonKey, val] of Object.entries(data)) {
+    runPage: function(scenario) {
+        return new Promise((resolve, reject) => {
+            this.abort = false;
             
-            // --- C'EST ICI QUE LA MAGIE OPÈRE ---
-            if (this.abort) {
-                this.log("🛑 Exécution interrompue par l'utilisateur.");
-                break; // On sort de la boucle immédiatement
-            }
-            // ------------------------------------
+            // 1. Préparation des données "en attente"
+            // On fait une copie pour pouvoir supprimer les clés au fur et à mesure
+            this.pendingData = this.prepareData(scenario);
+            this.fullScenarioData = scenario.donnees || scenario; // Gardé pour référence (stratégies)
+            
+            let totalFilled = 0;
+            let silenceTimer = null;
+            let observer = null;
 
-            const activeStrategy = this.findStrategy(jsonKey, scenario.donnees || scenario);
-            let result;
+            this.log(`Démarrage V7. Données à traiter : ${Object.keys(this.pendingData).length}`, "🚀");
 
-            if (activeStrategy && activeStrategy.customFill) {
-                result = await activeStrategy.customFill(jsonKey, val, (scenario.donnees || scenario), this);
-            } else {
-                const el = await this.waitForElement(jsonKey);
+            // --- FONCTION DE FIN ---
+            const finish = (reason) => {
+                if(observer) observer.disconnect();
+                if(silenceTimer) clearTimeout(silenceTimer);
+                this.log(`Terminé (${reason}). Champs remplis : ${totalFilled}`, "🏁");
+                resolve(totalFilled);
+            };
+
+            // --- FONCTION DE RESET DU TIMER ---
+            const bumpTimer = () => {
+                if(silenceTimer) clearTimeout(silenceTimer);
+                silenceTimer = setTimeout(() => {
+                    finish("Timeout Inactivité");
+                }, this.config.inactivityTimeout);
+            };
+
+            // --- FONCTION DE SCAN (Le coeur) ---
+            const scanAndFill = async () => {
+                if (this.abort) { finish("Arrêt Utilisateur"); return; }
                 
-                // Double check après l'attente (au cas où on a cliqué stop pendant l'attente)
-                if (this.abort) break;
+                let activityDetected = false;
+                const keysToRemove = [];
 
-                if (el) {
-                    if (this.isValueAlreadySet(el, val)) {
-                        result = 'SKIPPED';
+                // On parcourt tout ce qui reste à remplir
+                for (const [key, value] of Object.entries(this.pendingData)) {
+                    
+                    // 1. Stratégie ou Standard ?
+                    const strategy = this.findStrategy(key, this.fullScenarioData);
+                    let status = 'ABSENT';
+
+                    if (strategy && strategy.customFill) {
+                        // La stratégie gère sa propre logique (clic, check...)
+                        status = await strategy.customFill(key, value, this.fullScenarioData, this);
                     } else {
-                        const filled = this.fillField(el, val);
-                        result = filled ? 'OK' : 'KO';
+                        // Mode standard : on cherche l'élément
+                        const el = this.findElement(key);
+                        if (el && el.offsetParent !== null) {
+                            if (this.isValueAlreadySet(el, value)) {
+                                status = 'SKIPPED';
+                            } else {
+                                const ok = this.fillField(el, value);
+                                status = ok ? 'OK' : 'KO';
+                            }
+                        }
                     }
-                } else {
-                    result = 'ABSENT'; 
+
+                    // 2. Traitement du résultat
+                    if (status === 'OK') {
+                        this.log(`Rempli : ${key}`, '✅');
+                        totalFilled++;
+                        activityDetected = true;
+                        keysToRemove.push(key);
+                    } else if (status === 'SKIPPED') {
+                        this.log(`Déjà fait : ${key}`, '⏭️');
+                        keysToRemove.push(key); // On l'enlève de la liste car c'est fini
+                    } else if (status === 'PENDING') {
+                        // La stratégie a fait une action (ex: clic checkbox) mais n'a pas fini (attend l'input)
+                        // On considère ça comme une activité pour reset le timer
+                        activityDetected = true; 
+                    }
+                    // Si 'ABSENT', on ne fait rien, on garde la clé dans pendingData pour le prochain tour
                 }
-            }
-            
-            if (result === 'OK') {
-                actionCount++;
-                if(!activeStrategy) this.log(`Succès '${jsonKey}'`, '✅'); 
-                await this.sleep(this.config.stepDelay);
-            } else if (result === 'SKIPPED') {
-                this.log(`Ignoré '${jsonKey}'`, '⏭️');
-            }
-        }
-        return actionCount;
+
+                // Nettoyage des clés traitées
+                keysToRemove.forEach(k => delete this.pendingData[k]);
+
+                // Si on a tout fini
+                if (Object.keys(this.pendingData).length === 0) {
+                    finish("Succès - Plus de données");
+                    return;
+                }
+
+                // Si on a bougé quelque chose, on repousse la fin du monde
+                if (activityDetected) bumpTimer();
+            };
+
+            // --- INITIALISATION OBSERVER ---
+            observer = new MutationObserver((mutations) => {
+                // On s'intéresse aux ajouts de noeuds ou changements d'attributs (ex: disabled -> enabled)
+                const relevantMutation = mutations.some(m => 
+                    m.type === 'childList' && m.addedNodes.length > 0 ||
+                    m.type === 'attributes' && (m.attributeName === 'disabled' || m.attributeName === 'style' || m.attributeName === 'class')
+                );
+
+                if (relevantMutation) {
+                    // On relance un scan car le terrain a changé
+                    bumpTimer(); // Le DOM bouge, donc on est vivant
+                    scanAndFill();
+                }
+            });
+
+            observer.observe(document.body, { 
+                childList: true, 
+                subtree: true, 
+                attributes: true, // On surveille aussi les attributs (visibilité/disabled)
+                attributeFilter: ['style', 'class', 'disabled', 'hidden'] 
+            });
+
+            // Premier scan au démarrage (pour les champs déjà présents)
+            bumpTimer();
+            scanAndFill();
+        });
     },
 
     // --- UTILS (Inchangés) ---
-
+    
+    // (Garde ici tes fonctions findStrategy, prepareData, findElement, fillField, normalizeBooleans...)
+    // ... Je ne les répète pas pour alléger la lecture, mais il faut les inclure !
+    // Copie-colle les fonctions "Utils" de la V6.1 ci-dessous.
+    
     findStrategy: function(key, fullData) {
         const normalizedData = this.normalizeBooleans(fullData);
         return this.strategies.find(s => s.matches(key) && s.isActive(key, normalizedData));
