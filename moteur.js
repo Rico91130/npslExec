@@ -16,57 +16,62 @@ window.FormulaireTester = {
     strategies: [
         {
             id: 'AdresseBanOuManuelle_SaisieManuelle',
+            description: 'Gère la saisie manuelle adresse avec autocomplétion Angular Material',
+            
+            // On s'active sur la clé pivot _nomLong
             matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
-
+            
+            // Condition : le flag "Utiliser adresse manuelle" doit être à true
             isActive: (key, fullData) => {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
             },
 
+            // Nettoyage des clés techniques pour ne pas perturber le moteur
             getIgnoredKeys: (key) => {
-                const base = key.replace('_nomLong', '');
+                const base = key.replace('_nomLong', ''); 
                 return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
-                    .map(suffix => base + suffix);
+                       .map(suffix => base + suffix);
             },
 
-            customFill: async function (key, value, fullData, engine) {
+            customFill: async function(key, value, fullData, engine) {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
-                const inputTargetKey = key.replace('_nomLong', '');
+                const inputTargetKey = key.replace('_nomLong', ''); 
 
-                // 1. Checkbox
+                // 1. GESTION DE LA CHECKBOX
                 const checkboxEl = engine.findElement(checkboxKey);
                 if (checkboxEl && !checkboxEl.checked) {
                     engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
                     checkboxEl.click();
-                    return 'PENDING';
+                    return 'PENDING'; // On attend que le DOM réagisse (apparition des champs)
                 }
 
-                // 2. Calcul Valeur
+                // 2. CALCUL DE LA VALEUR À SAISIR
                 const cp = fullData[`${prefix}_communeActuelleAdresseManuelle_codePostal`];
                 const nom = fullData[`${prefix}_communeActuelleAdresseManuelle_nom`];
-                let textToType = value;
+                
+                // Format attendu par l'autocomplétion : "CP NOM" (ex: "80000 AMIENS")
+                let textToType = value; 
                 if (cp && nom) textToType = `${cp} ${nom}`;
 
                 const inputEl = engine.findElement(inputTargetKey);
-
+                
                 if (inputEl) {
-                    // 3. CHECKPRIORITAIRE : La liste d'options
-                    // On ne prend que les options visibles (pour éviter de cliquer sur des vieux overlays cachés)
+                    // 3. GESTION DE LA LISTE D'OPTIONS (Prioritaire)
+                    // On cherche les options Angular Material visibles
                     const allOptions = document.querySelectorAll('mat-option');
-                    // Filtre simple pour voir si visible (offsetParent n'est pas null)
                     const visibleOptions = Array.from(allOptions).filter(opt => opt.offsetParent !== null);
-
+                    
                     if (visibleOptions.length > 0) {
                         const targetOption = visibleOptions[0];
                         const targetText = targetOption.innerText.trim(); // ex: "AMIENS (80000)"
 
-                        // Petite sécurité pour ne pas cliquer n'importe où
+                        // Sécurité : on vérifie que l'option correspond un minimum à notre recherche
                         if(targetText.includes(nom) || targetText.includes(cp)) {
                              engine.log(`[Stratégie] Sélection de "${targetText}"`, 'point_up');
 
-                             // 1. Simulation d'un clic "Humain" (Mousedown est CRUCIAL pour Angular Material)
-                             // Angular Material attend souvent mousedown pour initier la sélection
+                             // A. Simulation d'un clic complet (Mousedown est CRUCIAL pour Angular)
                              ['mousedown', 'mouseup', 'click'].forEach(evtType => {
                                  const mouseEvent = new MouseEvent(evtType, {
                                      bubbles: true,
@@ -76,38 +81,45 @@ window.FormulaireTester = {
                                  targetOption.dispatchEvent(mouseEvent);
                              });
 
+                             // B. Ceinture et Bretelles : Forçage de la valeur dans l'input
+                             // Si le clic n'a pas mis à jour le champ (bug fréquent), on le fait manuellement
+                             if (inputEl.value !== targetText) {
+                                 engine.log(`[Stratégie] Correction valeur input -> "${targetText}"`, '🔧');
+                                 inputEl.value = targetText;
+                                 inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                                 inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                                 inputEl.blur(); // On quitte le champ pour fermer la liste
+                             }
 
-                             return 'OK'; 
+                             return 'OK'; // C'est terminé !
                         }
                     }
 
-                    // 4. Saisie du texte
+                    // 4. SAISIE DU TEXTE (Si pas encore fait)
                     if (inputEl.value !== textToType) {
                         engine.log(`[Stratégie] Saisie : "${textToType}"`, '⌨️');
                         engine.fillField(inputEl, textToType);
-
-                        // Forcer le focus est CRUCIAL pour Angular Material
-                        inputEl.focus();
+                        
+                        // On force le focus pour déclencher l'ouverture de la liste
+                        inputEl.focus(); 
                         inputEl.dispatchEvent(new Event('focus', { bubbles: true }));
                         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-
-                        return 'PENDING';
+                        
+                        return 'PENDING'; // On attend que la liste apparaisse
                     }
 
-                    // 5. ETAT D'ATTENTE (Le correctif est ici)
-                    // Le texte est bon, MAIS on n'a pas encore cliqué (sinon on serait sorti au point 3).
-                    // On force le moteur à repasser ici tant que la liste n'est pas apparue.
-
-                    // On remet le focus au cas où l'utilisateur (ou le script) l'ait perdu
+                    // 5. ATTENTE ACTIVE
+                    // Le texte est saisi, mais la liste n'est pas encore là.
+                    // On maintient le focus pour être sûr qu'elle apparaisse.
                     if (document.activeElement !== inputEl) {
                         inputEl.focus();
                         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
                     }
 
-                    return 'PENDING';
+                    return 'PENDING'; 
                 }
 
-                return 'ABSENT';
+                return 'ABSENT'; 
             }
         }
     ],
