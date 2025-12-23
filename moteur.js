@@ -3,7 +3,7 @@
  * Logique inversée : On observe le DOM et on tire dans le tas dès qu'une cible apparaît.
  */
 window.FormulaireTester = {
-    
+
     abort: false, // Flag d'arrêt manuel
 
     config: {
@@ -16,52 +16,70 @@ window.FormulaireTester = {
     strategies: [
         {
             id: 'AdresseBanOuManuelle_SaisieManuelle',
+            // On matche toujours sur le nomLong car c'est la clé "pivot" du composant
             matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
-            
+
             isActive: (key, fullData) => {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
             },
 
             getIgnoredKeys: (key) => {
-                const base = key.replace('_nomLong', ''); 
+                const base = key.replace('_nomLong', '');
                 return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
-                       .map(suffix => base + suffix);
+                    .map(suffix => base + suffix);
             },
 
-            // Dans la V7, customFill est appelé quand le DOM bouge. 
-            // Il doit être robuste et vérifier lui-même s'il peut avancer.
-            customFill: async function(key, value, fullData, engine) {
+            customFill: async function (key, value, fullData, engine) {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
-                const inputTargetKey = key.replace('_nomLong', ''); 
+                const inputTargetKey = key.replace('_nomLong', '');
 
-                // 1. Checkbox
+                // 1. Checkbox "Saisie Manuelle"
                 const checkboxEl = engine.findElement(checkboxKey);
-                // Si la checkbox est là mais pas cochée, on clique et ON S'ARRÊTE LÀ pour ce tour.
-                // Le clic va provoquer une mutation DOM qui relancera le moteur.
+                // Si la case n'est pas cochée, on clique et on attend que le DOM réagisse
                 if (checkboxEl && !checkboxEl.checked) {
                     engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
                     checkboxEl.click();
-                    return 'PENDING'; // On signale qu'on a fait une action mais que ce n'est pas fini
+                    return 'PENDING';
                 }
 
-                // 2. Input Commune
+                // 2. Calcul de la valeur à saisir (Format: "CP COMMUNE")
+                // On récupère les pièces détachées dans le jeu de données complet
+                const cp = fullData[`${prefix}_communeActuelleAdresseManuelle_codePostal`];
+                const nom = fullData[`${prefix}_communeActuelleAdresseManuelle_nom`];
+
+                let textToType = value; // Par défaut on garde le nomLong
+
+                // Si on a les infos pour construire le format spécifique demandé :
+                if (cp && nom) {
+                    textToType = `${cp} ${nom}`; // ex: "80000 AMIENS"
+                }
+
+                // 3. Remplissage de l'Input Commune
                 const inputEl = engine.findElement(inputTargetKey);
                 if (inputEl) {
-                    engine.log(`[Stratégie] Remplissage Commune`, '✍️');
-                    const success = engine.fillField(inputEl, value);
+                    // On vérifie si la valeur actuelle correspond déjà à ce qu'on veut
+                    // (Attention : parfois l'input reformate la valeur après saisie, donc soyez tolérant)
+                    if (engine.isValueAlreadySet(inputEl, textToType)) {
+                        return 'SKIPPED';
+                    }
+
+                    engine.log(`[Stratégie] Saisie Commune : "${textToType}"`, '✍️');
+                    const success = engine.fillField(inputEl, textToType);
+
+                    // Si c'est une autocomplétion, il faut souvent un petit délai ou un event supplémentaire
+                    // pour que la liste apparaisse, mais fillField dispatch déjà 'input'.
+
                     return success ? 'OK' : 'KO';
                 }
 
-                return 'ABSENT'; // On n'a rien pu faire pour l'instant
+                return 'ABSENT';
             }
         }
     ],
 
-    // --- NOYAU DU MOTEUR V7 ---
-
-    log: function(msg, emoji = 'ℹ️', data = null) {
+    log: function (msg, emoji = 'ℹ️', data = null) {
         if (this.config.verbose) {
             console.log(`%c[TESTER] ${emoji} ${msg}`, 'color: #cd094f; font-weight: bold;', data || '');
         }
@@ -70,15 +88,15 @@ window.FormulaireTester = {
     /**
      * Point d'entrée principal
      */
-    runPage: function(scenario) {
+    runPage: function (scenario) {
         return new Promise((resolve, reject) => {
             this.abort = false;
-            
+
             // 1. Préparation des données "en attente"
             // On fait une copie pour pouvoir supprimer les clés au fur et à mesure
             this.pendingData = this.prepareData(scenario);
             this.fullScenarioData = scenario.donnees || scenario; // Gardé pour référence (stratégies)
-            
+
             let totalFilled = 0;
             let silenceTimer = null;
             let observer = null;
@@ -87,15 +105,15 @@ window.FormulaireTester = {
 
             // --- FONCTION DE FIN ---
             const finish = (reason) => {
-                if(observer) observer.disconnect();
-                if(silenceTimer) clearTimeout(silenceTimer);
+                if (observer) observer.disconnect();
+                if (silenceTimer) clearTimeout(silenceTimer);
                 this.log(`Terminé (${reason}). Champs remplis : ${totalFilled}`, "🏁");
                 resolve(totalFilled);
             };
 
             // --- FONCTION DE RESET DU TIMER ---
             const bumpTimer = () => {
-                if(silenceTimer) clearTimeout(silenceTimer);
+                if (silenceTimer) clearTimeout(silenceTimer);
                 silenceTimer = setTimeout(() => {
                     finish("Timeout Inactivité");
                 }, this.config.inactivityTimeout);
@@ -104,13 +122,13 @@ window.FormulaireTester = {
             // --- FONCTION DE SCAN (Le coeur) ---
             const scanAndFill = async () => {
                 if (this.abort) { finish("Arrêt Utilisateur"); return; }
-                
+
                 let activityDetected = false;
                 const keysToRemove = [];
 
                 // On parcourt tout ce qui reste à remplir
                 for (const [key, value] of Object.entries(this.pendingData)) {
-                    
+
                     // 1. Stratégie ou Standard ?
                     const strategy = this.findStrategy(key, this.fullScenarioData);
                     let status = 'ABSENT';
@@ -143,7 +161,7 @@ window.FormulaireTester = {
                     } else if (status === 'PENDING') {
                         // La stratégie a fait une action (ex: clic checkbox) mais n'a pas fini (attend l'input)
                         // On considère ça comme une activité pour reset le timer
-                        activityDetected = true; 
+                        activityDetected = true;
                     }
                     // Si 'ABSENT', on ne fait rien, on garde la clé dans pendingData pour le prochain tour
                 }
@@ -164,7 +182,7 @@ window.FormulaireTester = {
             // --- INITIALISATION OBSERVER ---
             observer = new MutationObserver((mutations) => {
                 // On s'intéresse aux ajouts de noeuds ou changements d'attributs (ex: disabled -> enabled)
-                const relevantMutation = mutations.some(m => 
+                const relevantMutation = mutations.some(m =>
                     m.type === 'childList' && m.addedNodes.length > 0 ||
                     m.type === 'attributes' && (m.attributeName === 'disabled' || m.attributeName === 'style' || m.attributeName === 'class')
                 );
@@ -176,11 +194,11 @@ window.FormulaireTester = {
                 }
             });
 
-            observer.observe(document.body, { 
-                childList: true, 
-                subtree: true, 
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
                 attributes: true, // On surveille aussi les attributs (visibilité/disabled)
-                attributeFilter: ['style', 'class', 'disabled', 'hidden'] 
+                attributeFilter: ['style', 'class', 'disabled', 'hidden']
             });
 
             // Premier scan au démarrage (pour les champs déjà présents)
@@ -190,17 +208,17 @@ window.FormulaireTester = {
     },
 
     // --- UTILS (Inchangés) ---
-    
+
     // (Garde ici tes fonctions findStrategy, prepareData, findElement, fillField, normalizeBooleans...)
     // ... Je ne les répète pas pour alléger la lecture, mais il faut les inclure !
     // Copie-colle les fonctions "Utils" de la V6.1 ci-dessous.
-    
-    findStrategy: function(key, fullData) {
+
+    findStrategy: function (key, fullData) {
         const normalizedData = this.normalizeBooleans(fullData);
         return this.strategies.find(s => s.matches(key) && s.isActive(key, normalizedData));
     },
 
-    prepareData: function(input) {
+    prepareData: function (input) {
         let rawData = input.donnees ? input.donnees : input;
         let clean = {};
         const fullRawData = this.normalizeBooleans(rawData);
@@ -220,35 +238,35 @@ window.FormulaireTester = {
             let finalKey = key;
             if (key.endsWith('_libelle')) finalKey = key.replace('_libelle', '');
             if (key.endsWith('_valeur') && fullRawData[key.replace('_valeur', '_libelle')]) continue;
-            
+
             clean[finalKey] = val;
         }
         return clean;
     },
 
-    normalizeBooleans: function(data) {
+    normalizeBooleans: function (data) {
         const out = {};
-        for(const [k, v] of Object.entries(data)) {
+        for (const [k, v] of Object.entries(data)) {
             out[k] = (v === "true" || v === true) ? true : ((v === "false" || v === false) ? false : v);
         }
         return out;
     },
 
-    findElement: function(key) {
+    findElement: function (key) {
         const container = document.querySelector(`[data-clef="${key}"]`);
         if (container) {
-            if (['input','select','textarea'].includes(container.tagName.toLowerCase())) return container;
+            if (['input', 'select', 'textarea'].includes(container.tagName.toLowerCase())) return container;
             return container.querySelector('input, select, textarea');
         }
         return document.querySelector(`#${key}, [name="${key}"]`);
     },
 
-    isValueAlreadySet: function(el, val) {
+    isValueAlreadySet: function (el, val) {
         if (el.type === 'checkbox' || el.type === 'radio') return el.checked === val;
-        return el.value == val; 
+        return el.value == val;
     },
 
-    fillField: function(el, val) {
+    fillField: function (el, val) {
         try {
             el.focus();
             const tag = el.tagName.toLowerCase();
