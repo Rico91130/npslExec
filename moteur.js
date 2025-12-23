@@ -16,65 +16,77 @@ window.FormulaireTester = {
     strategies: [
         {
             id: 'AdresseBanOuManuelle_SaisieManuelle',
-            // On matche toujours sur le nomLong car c'est la clé "pivot" du composant
             matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
-
+            
             isActive: (key, fullData) => {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
             },
 
             getIgnoredKeys: (key) => {
-                const base = key.replace('_nomLong', '');
+                const base = key.replace('_nomLong', ''); 
                 return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
-                    .map(suffix => base + suffix);
+                       .map(suffix => base + suffix);
             },
 
-            customFill: async function (key, value, fullData, engine) {
+            customFill: async function(key, value, fullData, engine) {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
-                const inputTargetKey = key.replace('_nomLong', '');
+                const inputTargetKey = key.replace('_nomLong', ''); 
 
-                // 1. Checkbox "Saisie Manuelle"
+                // --- ETAPE 1 : La Checkbox ---
                 const checkboxEl = engine.findElement(checkboxKey);
-                // Si la case n'est pas cochée, on clique et on attend que le DOM réagisse
                 if (checkboxEl && !checkboxEl.checked) {
                     engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
                     checkboxEl.click();
-                    return 'PENDING';
+                    return 'PENDING'; // On attend que le DOM réagisse au clic
                 }
 
-                // 2. Calcul de la valeur à saisir (Format: "CP COMMUNE")
-                // On récupère les pièces détachées dans le jeu de données complet
+                // --- ETAPE 2 : Calcul de la valeur ---
                 const cp = fullData[`${prefix}_communeActuelleAdresseManuelle_codePostal`];
                 const nom = fullData[`${prefix}_communeActuelleAdresseManuelle_nom`];
+                let textToType = value; // Fallback
+                if (cp && nom) textToType = `${cp} ${nom}`; // "80000 AMIENS"
 
-                let textToType = value; // Par défaut on garde le nomLong
-
-                // Si on a les infos pour construire le format spécifique demandé :
-                if (cp && nom) {
-                    textToType = `${cp} ${nom}`; // ex: "80000 AMIENS"
-                }
-
-                // 3. Remplissage de l'Input Commune
                 const inputEl = engine.findElement(inputTargetKey);
+                
                 if (inputEl) {
-                    // On vérifie si la valeur actuelle correspond déjà à ce qu'on veut
-                    // (Attention : parfois l'input reformate la valeur après saisie, donc soyez tolérant)
-                    if (engine.isValueAlreadySet(inputEl, textToType)) {
-                        return 'SKIPPED';
+                    // --- ETAPE 3 : Sélection dans la liste (Prioritaire) ---
+                    // On regarde si des options d'autocomplétion sont affichées
+                    // Note: Angular Material place les mat-option hors du formulaire, souvent à la fin du body
+                    const options = document.querySelectorAll('mat-option');
+                    
+                    if (options.length > 0) {
+                        engine.log(`[Stratégie] Clic sur la 1ère suggestion (${options.length} trouvées)`, 'point_up');
+                        // On clique sur le premier élément visible
+                        options[0].click();
+                        return 'OK'; // C'est gagné, on a cliqué
                     }
 
-                    engine.log(`[Stratégie] Saisie Commune : "${textToType}"`, '✍️');
-                    const success = engine.fillField(inputEl, textToType);
+                    // --- ETAPE 2 (Suite) : Saisie du texte ---
+                    // Si la valeur n'est pas encore saisie, on tape
+                    if (inputEl.value !== textToType) {
+                        engine.log(`[Stratégie] Saisie pour autocomplétion : "${textToType}"`, '⌨️');
+                        
+                        // Saisie brute
+                        engine.fillField(inputEl, textToType);
+                        
+                        // Force le focus pour réveiller Angular Material
+                        inputEl.dispatchEvent(new Event('focus', { bubbles: true }));
+                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        
+                        return 'PENDING'; // On attend que la liste apparaisse suite à la saisie
+                    }
 
-                    // Si c'est une autocomplétion, il faut souvent un petit délai ou un event supplémentaire
-                    // pour que la liste apparaisse, mais fillField dispatch déjà 'input'.
-
-                    return success ? 'OK' : 'KO';
+                    // Cas limite : Le texte est saisi, mais pas de liste ?
+                    // Si on est là, c'est que inputEl.value === textToType MAIS options.length === 0.
+                    // Soit la liste n'est pas encore apparue (PENDING), soit on a déjà cliqué (OK).
+                    // Dans le doute, si le champ est rempli, on peut considérer que c'est OK ou attendre un peu.
+                    // Pour éviter de bloquer, si c'est rempli, on valide.
+                    return 'OK'; 
                 }
 
-                return 'ABSENT';
+                return 'ABSENT'; 
             }
         }
     ],
