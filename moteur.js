@@ -14,20 +14,15 @@ window.FormulaireTester = {
 
     // --- STRATÉGIES (Adaptées pour ne pas bloquer le flux) ---
     strategies: [
-        {
+ {
             id: 'AdresseBanOuManuelle_SaisieManuelle',
-            description: 'Gère la saisie manuelle adresse avec autocomplétion Angular Material',
-            
-            // On s'active sur la clé pivot _nomLong
             matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
             
-            // Condition : le flag "Utiliser adresse manuelle" doit être à true
             isActive: (key, fullData) => {
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
             },
 
-            // Nettoyage des clés techniques pour ne pas perturber le moteur
             getIgnoredKeys: (key) => {
                 const base = key.replace('_nomLong', ''); 
                 return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
@@ -39,78 +34,71 @@ window.FormulaireTester = {
                 const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
                 const inputTargetKey = key.replace('_nomLong', ''); 
 
-                // 1. GESTION DE LA CHECKBOX
+                // 1. CHECKBOX
                 const checkboxEl = engine.findElement(checkboxKey);
                 if (checkboxEl && !checkboxEl.checked) {
                     engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
                     checkboxEl.click();
-                    return 'PENDING'; // On attend que le DOM réagisse (apparition des champs)
+                    return 'PENDING';
                 }
 
-                // 2. CALCUL DE LA VALEUR À SAISIR
+                // 2. VALEUR CIBLE
                 const cp = fullData[`${prefix}_communeActuelleAdresseManuelle_codePostal`];
                 const nom = fullData[`${prefix}_communeActuelleAdresseManuelle_nom`];
-                
-                // Format attendu par l'autocomplétion : "CP NOM" (ex: "80000 AMIENS")
                 let textToType = value; 
                 if (cp && nom) textToType = `${cp} ${nom}`;
 
                 const inputEl = engine.findElement(inputTargetKey);
                 
                 if (inputEl) {
-                    // 3. GESTION DE LA LISTE D'OPTIONS (Prioritaire)
-                    // On cherche les options Angular Material visibles
+                    // 3. GESTION LISTE (Avec Temporisation)
                     const allOptions = document.querySelectorAll('mat-option');
+                    // On filtre pour être sûr qu'ils sont affichés
                     const visibleOptions = Array.from(allOptions).filter(opt => opt.offsetParent !== null);
                     
                     if (visibleOptions.length > 0) {
                         const targetOption = visibleOptions[0];
-                        const targetText = targetOption.innerText.trim(); // ex: "AMIENS (80000)"
+                        const targetText = targetOption.innerText.trim();
 
-                        // Sécurité : on vérifie que l'option correspond un minimum à notre recherche
+                        // Sécurité de correspondance
                         if(targetText.includes(nom) || targetText.includes(cp)) {
-                             engine.log(`[Stratégie] Sélection de "${targetText}"`, 'point_up');
+                             
+                             // On a trouvé l'option, mais on attend un peu pour être sûr 
+                             // que l'animation d'ouverture d'Angular est terminée.
+                             engine.log(`[Stratégie] Option trouvée. Pause stabilisation...`, '⏳');
+                             await engine.sleep(300); // 300ms de pause explicite
 
-                             // A. Simulation d'un clic complet (Mousedown est CRUCIAL pour Angular)
-                             ['mousedown', 'mouseup', 'click'].forEach(evtType => {
-                                 const mouseEvent = new MouseEvent(evtType, {
-                                     bubbles: true,
-                                     cancelable: true,
-                                     view: window
-                                 });
-                                 targetOption.dispatchEvent(mouseEvent);
-                             });
+                             engine.log(`[Stratégie] Clic natif sur "${targetText}"`, 'point_up');
+                             targetOption.click();
 
-                             // B. Ceinture et Bretelles : Forçage de la valeur dans l'input
-                             // Si le clic n'a pas mis à jour le champ (bug fréquent), on le fait manuellement
-                             if (inputEl.value !== targetText) {
-                                 engine.log(`[Stratégie] Correction valeur input -> "${targetText}"`, '🔧');
+                             // Petite pause post-clic pour laisser le champ se mettre à jour
+                             await engine.sleep(100);
+
+                             // Vérification finale : si le clic n'a pas marché, on force
+                             if (!inputEl.value.includes(nom)) {
+                                 engine.log(`[Stratégie] Le clic a échoué, forçage valeur.`, '🔧');
                                  inputEl.value = targetText;
                                  inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                                 inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-                                 inputEl.blur(); // On quitte le champ pour fermer la liste
+                                 inputEl.blur();
                              }
 
-                             return 'OK'; // C'est terminé !
+                             return 'OK'; 
                         }
                     }
 
-                    // 4. SAISIE DU TEXTE (Si pas encore fait)
+                    // 4. SAISIE (Si nécessaire)
                     if (inputEl.value !== textToType) {
                         engine.log(`[Stratégie] Saisie : "${textToType}"`, '⌨️');
                         engine.fillField(inputEl, textToType);
                         
-                        // On force le focus pour déclencher l'ouverture de la liste
+                        // Focus pour ouvrir la liste
                         inputEl.focus(); 
-                        inputEl.dispatchEvent(new Event('focus', { bubbles: true }));
                         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
                         
-                        return 'PENDING'; // On attend que la liste apparaisse
+                        return 'PENDING'; 
                     }
 
-                    // 5. ATTENTE ACTIVE
-                    // Le texte est saisi, mais la liste n'est pas encore là.
-                    // On maintient le focus pour être sûr qu'elle apparaisse.
+                    // 5. ATTENTE LISTE
                     if (document.activeElement !== inputEl) {
                         inputEl.focus();
                         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
