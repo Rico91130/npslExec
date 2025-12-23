@@ -66,7 +66,7 @@ window.FormulaireTester = {
                              // On a trouvé l'option, mais on attend un peu pour être sûr 
                              // que l'animation d'ouverture d'Angular est terminée.
                              engine.log(`[Stratégie] Option trouvée. Pause stabilisation...`, '⏳');
-                             await engine.sleep(300); // 300ms de pause explicite
+                             await engine.sleep(1000); // 300ms de pause explicite
 
                              engine.log(`[Stratégie] Clic natif sur "${targetText}"`, 'point_up');
                              targetOption.click();
@@ -118,6 +118,10 @@ window.FormulaireTester = {
         }
     },
 
+    sleep: function(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    },
+    
     /**
      * Point d'entrée principal
      */
