@@ -30,17 +30,12 @@ window.FormulaireTester = {
         const data = this.prepareData(scenario);
         let actionCount = 0;
 
-        // On fait une analyse rapide des clés visibles pour optimiser
-        // MAIS on garde en tête que de nouvelles clés peuvent apparaître
-        const visibleSnapshot = this.scanVisibleKeys();
-        this.log(`Analyse page : ${visibleSnapshot.size} champs visibles initialement.`, '🔍');
+        // 1. Première analyse de la page
+        let visibleSnapshot = this.scanVisibleKeys();
+        this.log(`Analyse initiale : ${visibleSnapshot.size} champs visibles.`, '🔍');
 
         for (const [key, val] of Object.entries(data)) {
-            // STRATÉGIE HYBRIDE :
-            // 1. Si le champ est déjà visible -> On y va
-            // 2. Si le champ n'est pas visible MAIS qu'il ressemble à un champ dépendant (même préfixe) -> On tente quand même (le Smart Retry s'occupera d'attendre)
-            // 3. Sinon, on ignore pour ne pas attendre pour rien les champs de la page 3
-            
+            // 2. Vérification de visibilité (basée sur le snapshot courant)
             const isVisible = this.isKeyLikelyVisible(key, visibleSnapshot);
             
             if (isVisible) {
@@ -49,18 +44,22 @@ window.FormulaireTester = {
                 if (result === 'OK') {
                     actionCount++;
                     this.log(`Succès pour '${key}'`, '✅');
+
+                    // --- CORRECTION MAJEURE ICI ---
+                    // Une action a eu lieu, le DOM a pu changer (nouveaux champs apparus).
+                    // On met à jour la photo des champs visibles pour la suite de la boucle.
+                    visibleSnapshot = this.scanVisibleKeys(); 
+                    // ------------------------------
+                    
                 } else if (result === 'SKIPPED') {
                     this.log(`Ignoré '${key}' (Déjà rempli)`, '⏭️');
-                } else if (result === 'ABSENT') {
-                    // C'est ici que le Smart Retry a échoué après attente
-                    // this.log(`Abusent après attente '${key}'`, '💨');
                 }
             }
         }
         
         return actionCount;
     },
-
+    
     /**
      * Recherche un élément dans le DOM
      */
