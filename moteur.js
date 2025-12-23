@@ -1,17 +1,15 @@
 /**
- * MOTEUR V3.1 - Avec Logs Verbeux
+ * MOTEUR V3.2 - Gestion de la Temporisation et des Apparitions dynamiques
  */
 window.FormulaireTester = {
     // Configuration globale
     config: {
-        autoNext: false,
-        stepDelay: 100,
-        verbose: false // Désactivé par défaut
+        verbose: false,      // Logs détaillés
+        stepDelay: 300,      // Pause SYSTÉMATIQUE après chaque remplissage (ms)
+        retryAttempts: 10,   // Combien de fois on cherche un champ manquant
+        retryInterval: 200   // Temps entre deux recherches (ms) -> Total max = 2 sec
     },
 
-    /**
-     * Helper pour logger uniquement si activé
-     */
     log: function(msg, emoji = 'ℹ️', data = null) {
         if (this.config.verbose) {
             const prefix = `%c[TESTER] ${emoji}`;
@@ -21,50 +19,124 @@ window.FormulaireTester = {
         }
     },
 
+    /**
+     * Utilitaire de pause (Promise)
+     */
+    sleep: function(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    },
+
     runPage: async function(scenario) {
         const data = this.prepareData(scenario);
         let actionCount = 0;
 
-        // Analyse du DOM
-        const visibleInputs = document.querySelectorAll('input, select, textarea');
-        const visibleKeys = new Set();
-        visibleInputs.forEach(el => {
-            const container = el.closest('[data-clef]');
-            if(container) visibleKeys.add(container.getAttribute('data-clef'));
-            if(el.id) visibleKeys.add(el.id);
-            if(el.name) visibleKeys.add(el.name);
-        });
-
-        this.log(`Analyse de la page : ${visibleKeys.size} champs interactifs détectés.`, '🔍', [...visibleKeys]);
+        // On fait une analyse rapide des clés visibles pour optimiser
+        // MAIS on garde en tête que de nouvelles clés peuvent apparaître
+        const visibleSnapshot = this.scanVisibleKeys();
+        this.log(`Analyse page : ${visibleSnapshot.size} champs visibles initialement.`, '🔍');
 
         for (const [key, val] of Object.entries(data)) {
-            // Check visibilité
-            if (this.isKeyVisible(key, visibleKeys)) {
-                this.log(`Tentative de remplissage pour '${key}'...`, '👉');
+            // STRATÉGIE HYBRIDE :
+            // 1. Si le champ est déjà visible -> On y va
+            // 2. Si le champ n'est pas visible MAIS qu'il ressemble à un champ dépendant (même préfixe) -> On tente quand même (le Smart Retry s'occupera d'attendre)
+            // 3. Sinon, on ignore pour ne pas attendre pour rien les champs de la page 3
+            
+            const isVisible = this.isKeyLikelyVisible(key, visibleSnapshot);
+            
+            if (isVisible) {
                 const result = await this.tryFill(key, val);
                 
                 if (result === 'OK') {
                     actionCount++;
                     this.log(`Succès pour '${key}'`, '✅');
                 } else if (result === 'SKIPPED') {
-                    this.log(`Ignoré '${key}' (Déjà rempli ou identique)`, '⏭️');
-                } else {
-                    this.log(`Échec pour '${key}' (Technique)`, '❌');
+                    this.log(`Ignoré '${key}' (Déjà rempli)`, '⏭️');
+                } else if (result === 'ABSENT') {
+                    // C'est ici que le Smart Retry a échoué après attente
+                    // this.log(`Abusent après attente '${key}'`, '💨');
                 }
-            } else {
-                // Utile pour savoir quels champs du scénario sont "hors scope"
-                // this.log(`Champ '${key}' non visible sur cette page.`, '👻'); 
             }
         }
         
         return actionCount;
     },
 
-    isKeyVisible: function(key, set) {
-        if (set.has(key)) return true;
-        for (let k of set) {
-            if (key.startsWith(k)) return true;
+    /**
+     * Recherche un élément dans le DOM
+     */
+    findElement: function(key) {
+        const container = document.querySelector(`[data-clef="${key}"], [data-testid="${key}"]`);
+        let field = container ? container.querySelector('input, select, textarea') : null;
+        if (!field) field = document.querySelector(`#${key}, [name="${key}"]`);
+        return field;
+    },
+
+    /**
+     * Tente de remplir un champ avec mécanisme de RÉESSAI (Retry)
+     */
+    tryFill: async function(key, val) {
+        let field = null;
+
+        // BOUCLE DE RETRY (C'est ici qu'on gère l'apparition retardée)
+        for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
+            field = this.findElement(key);
+
+            // Condition de sortie : Champ trouvé ET visible
+            if (field && field.offsetParent !== null) {
+                break;
+            }
+
+            // Si pas trouvé, on attend un peu (sauf au dernier essai)
+            if (attempt < this.config.retryAttempts) {
+                // On ne loggue l'attente que si on est en mode verbeux pour ne pas polluer
+                if(attempt === 1 && this.config.verbose) this.log(`Attente apparition '${key}'...`, '⏳');
+                await this.sleep(this.config.retryInterval);
+            }
         }
+
+        if (field && field.offsetParent !== null) {
+            // Vérification si déjà rempli
+            if (this.isValueAlreadySet(field, val)) {
+                 return 'SKIPPED';
+            }
+            
+            // Remplissage effectif
+            if (this.fillField(field, val)) {
+                // PAUSE DE SÉCURITÉ APRÈS ÉCRITURE (Important pour Angular)
+                await this.sleep(this.config.stepDelay);
+                return 'OK';
+            } else {
+                return 'KO';
+            }
+        } else {
+            return 'ABSENT';
+        }
+    },
+
+    scanVisibleKeys: function() {
+        const set = new Set();
+        document.querySelectorAll('input, select, textarea').forEach(el => {
+            const container = el.closest('[data-clef]');
+            if(container) set.add(container.getAttribute('data-clef'));
+            if(el.id) set.add(el.id);
+            if(el.name) set.add(el.name);
+        });
+        return set;
+    },
+
+    isKeyLikelyVisible: function(key, set) {
+        // 1. Exact match
+        if (set.has(key)) return true;
+        
+        // 2. Dépendance probable (ex: 'adresse' est visible, donc 'adresse_rue' peut l'être bientôt)
+        // On vérifie si un préfixe de la clé existe déjà dans les éléments visibles
+        for (let visibleKey of set) {
+            if (key.startsWith(visibleKey)) return true; // ex: visibleKey='adresse', key='adresse_numero'
+        }
+        
+        // 3. Si le set est vide (page vierge chargée), on tente tout
+        if (set.size === 0) return true;
+
         return false;
     },
 
@@ -81,33 +153,8 @@ window.FormulaireTester = {
         return clean;
     },
 
-    tryFill: function(key, val) {
-        return new Promise((resolve) => {
-            const container = document.querySelector(`[data-clef="${key}"], [data-testid="${key}"]`);
-            let field = container ? container.querySelector('input, select, textarea') : null;
-            if (!field) field = document.querySelector(`#${key}, [name="${key}"]`);
-
-            if (field && field.offsetParent !== null) {
-                if (this.isValueAlreadySet(field, val)) {
-                     resolve('SKIPPED');
-                     return;
-                }
-                
-                if (this.fillField(field, val)) {
-                    setTimeout(() => resolve('OK'), this.config.stepDelay);
-                } else {
-                    resolve('KO');
-                }
-            } else {
-                this.log(`Champ '${key}' trouvé mais invisible ou inaccessible.`, '⚠️');
-                resolve('ABSENT');
-            }
-        });
-    },
-
     isValueAlreadySet: function(el, val) {
         if (el.type === 'checkbox' || el.type === 'radio') return el.checked === val;
-        // Comparaison souple pour gérer les conversions string/number
         return el.value == val; 
     },
 
@@ -125,13 +172,12 @@ window.FormulaireTester = {
                     if (el.options[i].text.includes(val)) {
                         el.selectedIndex = i;
                         found = true;
-                        // Log précis pour les selects (souvent source d'erreur)
-                        this.log(`Option sélectionnée : "${el.options[i].text}" (index ${i})`, '🔽');
+                        this.log(`Select '${el.name||el.id}' -> "${el.options[i].text}"`, '🔽');
                         break;
                     }
                 }
                 if (found) el.dispatchEvent(new Event('change', { bubbles: true }));
-                else this.log(`Aucune option contenant "${val}" trouvée dans le select.`, '⚠️');
+                else this.log(`Option "${val}" introuvable`, '⚠️');
             } else {
                 el.value = val;
                 el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -139,9 +185,6 @@ window.FormulaireTester = {
             }
             el.blur();
             return true;
-        } catch (e) { 
-            this.log(`Exception lors du remplissage : ${e.message}`, '🔥');
-            return false; 
-        }
+        } catch (e) { return false; }
     }
 };
