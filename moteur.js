@@ -9,7 +9,7 @@ window.FormulaireTester = {
     config: {
         verbose: true,
         stepDelay: 100,       // Délai esthétique minimal entre deux actions (pour voir ce qui se passe)
-        timeout: 3000         // Temps max d'attente pour l'apparition d'un champ (ms)
+        timeout: 300         // Temps max d'attente pour l'apparition d'un champ (ms)
     },
 
     // --- 2. STRATÉGIES (Composants Riches) ---
