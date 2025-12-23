@@ -1,6 +1,3 @@
-/**
- * TOOLBAR D'EXÉCUTION
- */
 (function() {
     // 0. Init
     const engineCode = localStorage.getItem('MON_MOTEUR_LIB');
@@ -11,7 +8,12 @@
         return;
     }
     
+    // Chargement du moteur si absent
     if(!window.FormulaireTester) window.eval(engineCode);
+    
+    // Initialisation du flag d'arrêt
+    window.FormulaireTester.abort = false;
+
     const SCENARIO = JSON.parse(scenarioStr);
 
     // 1. UI
@@ -38,17 +40,16 @@
                 Logs
             </label>
 
-            <label style="display:flex; align-items:center; cursor:pointer; font-size:14px;">
-                <input type="checkbox" id="chkAutoNext" style="margin-right:5px;">
-                Auto-Suivant
-            </label>
-            
             <button id="btnSnapshot" style="background:#333; color:#eee; border:1px solid #555; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px; display:flex; align-items:center; gap:5px;">
                 📸 HTML
             </button>
 
             <div style="width:1px; height:20px; background:#555; margin:0 5px;"></div>
             
+            <button id="btnStopPage" style="display:none; background:#e1000f; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:bold;">
+                ⏹ Stop
+            </button>
+
             <button id="btnRunPage" style="background:#000091; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">
                 ▶ Remplir
             </button>
@@ -59,8 +60,8 @@
 
     // 2. Logique
     const btnRun = document.getElementById('btnRunPage');
-    const btnSnapshot = document.getElementById('btnSnapshot'); // Nouveau
-    const chkAutoNext = document.getElementById('chkAutoNext');
+    const btnStop = document.getElementById('btnStopPage');
+    const btnSnapshot = document.getElementById('btnSnapshot');
     const chkLogs = document.getElementById('chkLogs');
     const status = document.getElementById('status-text');
 
@@ -91,55 +92,63 @@
         }
     };
 
-    // Listeners
-    btnSnapshot.onclick = downloadSnapshot;
-
-    chkLogs.onchange = () => {
-        if(window.FormulaireTester) {
-            window.FormulaireTester.config.verbose = chkLogs.checked;
-            console.log("[TOOLBAR] Verbose mode : " + chkLogs.checked);
+    // --- Fonction Stop ---
+    const stopExecution = () => {
+        if(isRunning) {
+            status.innerText = "🛑 Arrêt demandé...";
+            window.FormulaireTester.abort = true; // Signal envoyé au moteur
+            // Note: Le moteur doit vérifier ce flag pour s'arrêter réellement
         }
     };
 
+    // --- Fonction Run ---
     const runCycle = async () => {
         if(isRunning) return;
+        
+        // Bascule UI : Mode Lecture
         isRunning = true;
+        window.FormulaireTester.abort = false; // Reset du flag
+        btnRun.style.display = 'none';
+        btnStop.style.display = 'block'; // Affichage du bouton Stop
+        
         status.innerText = "⏳ Remplissage...";
-        btnRun.disabled = true;
-        btnRun.style.opacity = 0.5;
 
         try {
-            // Synchro config avant lancement
-            window.FormulaireTester.config.verbose = chkLogs.checked;
-
-            const actions = await window.FormulaireTester.runPage(SCENARIO);
-            status.innerText = `✅ ${actions} champs remplis.`;
-
-            if(chkAutoNext.checked) {
-                const nextBtn = document.querySelector('#btn-next, button.fr-btn--icon-right');
-                if(nextBtn && !nextBtn.disabled) {
-                    status.innerText += " ➡ Suivant...";
-                    setTimeout(() => nextBtn.click(), 500);
-                } else {
-                    status.innerText += " (Attente validation)";
-                }
+            // Synchro config
+            if(window.FormulaireTester.config) {
+                window.FormulaireTester.config.verbose = chkLogs.checked;
             }
+
+            // Exécution
+            const actions = await window.FormulaireTester.runPage(SCENARIO);
+            
+            // Résultat
+            if (window.FormulaireTester.abort) {
+                status.innerText = `🛑 Stoppé (${actions} champs traités).`;
+            } else {
+                status.innerText = `✅ ${actions} champs remplis.`;
+            }
+
         } catch(e) {
             status.innerText = "❌ Erreur: " + e.message;
             console.error(e);
         } finally {
+            // Bascule UI : Mode Repos
             isRunning = false;
-            btnRun.disabled = false;
-            btnRun.style.opacity = 1;
+            btnStop.style.display = 'none';
+            btnRun.style.display = 'block';
         }
     };
 
+    // Listeners
+    btnSnapshot.onclick = downloadSnapshot;
     btnRun.onclick = runCycle;
+    btnStop.onclick = stopExecution;
 
-    // Boucle de surveillance
-    setInterval(() => {
-        if(chkAutoNext.checked && !isRunning) {
-            // Optionnel : relance auto
+    chkLogs.onchange = () => {
+        if(window.FormulaireTester && window.FormulaireTester.config) {
+            window.FormulaireTester.config.verbose = chkLogs.checked;
         }
-    }, 2000);
+    };
+
 })();

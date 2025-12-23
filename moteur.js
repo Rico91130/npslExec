@@ -1,15 +1,17 @@
 /**
- * MOTEUR V6.0 - Architecture Réactive (MutationObserver)
- * Fini les "sleep" arbitraires, place à la détection d'événements DOM.
+ * MOTEUR V6.1 - Réactif (MutationObserver) + Gestion Arrêt (Stop)
  */
 window.FormulaireTester = {
     
+    // Flag de contrôle (piloté par la Toolbar)
+    abort: false,
+
     // --- 1. CONFIGURATION ---
     
     config: {
         verbose: true,
-        stepDelay: 100,       // Délai esthétique minimal entre deux actions (pour voir ce qui se passe)
-        timeout: 300         // Temps max d'attente pour l'apparition d'un champ (ms)
+        stepDelay: 100,       // Délai esthétique
+        timeout: 3000         // Temps max d'attente (300ms était un peu court, je remets 3s par sécurité, ou tu peux mettre 300)
     },
 
     // --- 2. STRATÉGIES (Composants Riches) ---
@@ -30,6 +32,9 @@ window.FormulaireTester = {
             },
 
             customFill: async function(key, value, fullData, engine) {
+                // Check STOP avant de commencer une stratégie longue
+                if(engine.abort) return 'SKIPPED';
+
                 const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
                 const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
                 const inputTargetKey = key.replace('_nomLong', ''); 
@@ -41,11 +46,12 @@ window.FormulaireTester = {
                 if (checkboxEl && !checkboxEl.checked) {
                     engine.log(`[Stratégie Adresse] Clic sur 'Adresse Manuelle'`, '☑️');
                     checkboxEl.click();
-                    // On ne fait pas de sleep ici ! On attendra simplement que l'input apparaisse via waitForElement
                 }
 
-                // 2. Attente intelligente de l'apparition du champ input
-                // Le MutationObserver va détecter l'apparition du champ suite au clic précédent
+                // Check STOP pendant l'exécution
+                if(engine.abort) return 'SKIPPED';
+
+                // 2. Attente intelligente
                 const inputEl = await engine.waitForElement(inputTargetKey);
 
                 if (!inputEl) {
@@ -72,79 +78,79 @@ window.FormulaireTester = {
         return new Promise(resolve => setTimeout(resolve, ms));
     },
 
-    /**
-     * Cœur de la V6 : Attend l'apparition d'un élément via MutationObserver
-     * @param {string} key - La data-clef, l'id ou le name à chercher
-     * @returns {Promise<HTMLElement|null>}
-     */
     waitForElement: function(key) {
         return new Promise((resolve) => {
-            // 1. Vérification immédiate (Fast path)
+            // Check immédiat
             const existingEl = this.findElement(key);
             if (existingEl && existingEl.offsetParent !== null) {
                 return resolve(existingEl);
             }
 
+            // Si on a demandé l'arrêt, inutile d'attendre
+            if (this.abort) return resolve(null);
+
             if(this.config.verbose) this.log(`Attente DOM pour '${key}'...`, '👀');
 
-            // 2. Mise en place de l'Observer
             let observer;
             let timer;
 
-            // Fonction de nettoyage
             const cleanup = () => {
                 if(observer) observer.disconnect();
                 if(timer) clearTimeout(timer);
             };
 
-            // L'observateur qui surveille tout le body
             observer = new MutationObserver((mutations) => {
-                // Optimisation : On ne cherche que si on a détecté des ajouts de noeuds
+                // Check Stop constant
+                if (this.abort) { cleanup(); return resolve(null); }
+
                 const hasAddedNodes = mutations.some(m => m.addedNodes.length > 0);
                 if (!hasAddedNodes) return;
 
                 const el = this.findElement(key);
-                // On vérifie qu'il existe ET qu'il est visible
                 if (el && el.offsetParent !== null) {
                     cleanup();
                     resolve(el);
                 }
             });
 
-            // Démarrage de l'observation
-            observer.observe(document.body, {
-                childList: true, // Ajout/Retrait d'enfants directs
-                subtree: true    // ... dans toute la descendance
-            });
+            observer.observe(document.body, { childList: true, subtree: true });
 
-            // 3. Timeout de sécurité (Si le champ n'apparaît jamais)
             timer = setTimeout(() => {
                 cleanup();
-                // On ne rejette pas la promesse pour ne pas planter le script, on renvoie null
                 resolve(null); 
             }, this.config.timeout);
         });
     },
 
+    /**
+     * Point d'entrée principal
+     */
     runPage: async function(scenario) {
         const data = this.prepareData(scenario);
         let actionCount = 0;
 
-        this.log("Démarrage moteur V6 (Réactif)", "🚀");
+        this.log("Démarrage moteur V6.1 (Réactif + Stop)", "🚀");
 
         for (const [jsonKey, val] of Object.entries(data)) {
             
+            // --- C'EST ICI QUE LA MAGIE OPÈRE ---
+            if (this.abort) {
+                this.log("🛑 Exécution interrompue par l'utilisateur.");
+                break; // On sort de la boucle immédiatement
+            }
+            // ------------------------------------
+
             const activeStrategy = this.findStrategy(jsonKey, scenario.donnees || scenario);
             let result;
 
             if (activeStrategy && activeStrategy.customFill) {
-                // Délégation stratégie
                 result = await activeStrategy.customFill(jsonKey, val, (scenario.donnees || scenario), this);
             } else {
-                // Remplissage standard réactif
-                // waitForElement remplace la boucle de retry
                 const el = await this.waitForElement(jsonKey);
                 
+                // Double check après l'attente (au cas où on a cliqué stop pendant l'attente)
+                if (this.abort) break;
+
                 if (el) {
                     if (this.isValueAlreadySet(el, val)) {
                         result = 'SKIPPED';
@@ -153,20 +159,16 @@ window.FormulaireTester = {
                         result = filled ? 'OK' : 'KO';
                     }
                 } else {
-                    result = 'ABSENT'; // Timeout atteint
+                    result = 'ABSENT'; 
                 }
             }
             
             if (result === 'OK') {
                 actionCount++;
                 if(!activeStrategy) this.log(`Succès '${jsonKey}'`, '✅'); 
-                // Petit délai esthétique uniquement (non bloquant pour la logique)
                 await this.sleep(this.config.stepDelay);
             } else if (result === 'SKIPPED') {
                 this.log(`Ignoré '${jsonKey}'`, '⏭️');
-            } else if (result === 'ABSENT') {
-                // Optionnel : Loguer les absents pour debug
-                // this.log(`Absent '${jsonKey}'`, '❌');
             }
         }
         return actionCount;
