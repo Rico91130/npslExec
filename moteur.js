@@ -45,11 +45,7 @@ window.FormulaireTester = {
                     actionCount++;
                     this.log(`Succès pour '${key}'`, '✅');
 
-                    // --- CORRECTION MAJEURE ICI ---
-                    // Une action a eu lieu, le DOM a pu changer (nouveaux champs apparus).
-                    // On met à jour la photo des champs visibles pour la suite de la boucle.
                     visibleSnapshot = this.scanVisibleKeys(); 
-                    // ------------------------------
                     
                 } else if (result === 'SKIPPED') {
                     this.log(`Ignoré '${key}' (Déjà rempli)`, '⏭️');
@@ -59,7 +55,7 @@ window.FormulaireTester = {
         
         return actionCount;
     },
-    
+
     /**
      * Recherche un élément dans le DOM
      */
@@ -101,7 +97,6 @@ window.FormulaireTester = {
             
             // Remplissage effectif
             if (this.fillField(field, val)) {
-                // PAUSE DE SÉCURITÉ APRÈS ÉCRITURE (Important pour Angular)
                 await this.sleep(this.config.stepDelay);
                 return 'OK';
             } else {
