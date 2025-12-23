@@ -101,42 +101,45 @@ window.FormulaireTester = {
         const data = this.prepareData(scenario);
         let actionCount = 0;
 
-        // Snapshot initial
+        // On garde le log pour info, mais on ne l'utilise plus pour filtrer
         let visibleSnapshot = this.scanVisibleKeys();
-        this.log(`Analyse initiale : ${visibleSnapshot.size} champs détectés.`, '🔍');
+        this.log(`Démarrage : ${visibleSnapshot.size} champs détectés.`, '🔍');
 
         for (const [jsonKey, val] of Object.entries(data)) {
             
             // 1. Résolution de la Stratégie
             const activeStrategy = this.findStrategy(jsonKey, scenario.donnees || scenario);
             
-            // Calcul de la clé de visibilité (soit la clé JSON, soit une clé cible si la stratégie le dit)
-            // Pour le customFill, on estime que la clé principale est celle à vérifier
-            let checkVisiblityKey = jsonKey; 
+            // --- CORRECTION V5.1 ---
+            // On supprime la vérification "isKeyLikelyVisible" qui empêchait 
+            // d'attendre l'apparition des champs conditionnels.
+            // On tente systématiquement le remplissage.
             
-            // Petite astuce : si on a une stratégie custom, on suppose que c'est visible ou que la stratégie gère l'attente
-            const isVisible = activeStrategy ? true : this.isKeyLikelyVisible(checkVisiblityKey, visibleSnapshot);
-            
-            if (isVisible) {
-                let result;
+            let result;
 
-                if (activeStrategy && activeStrategy.customFill) {
-                    // -> DÉLÉGATION À LA STRATÉGIE
-                    result = await activeStrategy.customFill(jsonKey, val, (scenario.donnees || scenario), this);
-                } else {
-                    // -> REMPLISSAGE STANDARD
-                    result = await this.tryFill(jsonKey, val);
-                }
-                
-                if (result === 'OK') {
-                    actionCount++;
-                    if(!activeStrategy) this.log(`Succès pour '${jsonKey}'`, '✅'); // Log standard
-                    visibleSnapshot = this.scanVisibleKeys(); 
-                    await this.sleep(this.config.stepDelay);
-                } else if (result === 'SKIPPED') {
-                    this.log(`Ignoré '${jsonKey}' (Déjà fait)`, '⏭️');
-                }
+            if (activeStrategy && activeStrategy.customFill) {
+                // -> DÉLÉGATION À LA STRATÉGIE
+                result = await activeStrategy.customFill(jsonKey, val, (scenario.donnees || scenario), this);
+            } else {
+                // -> REMPLISSAGE STANDARD
+                // C'est "tryFill" qui s'occupera d'attendre (retry) si le champ n'est pas encore là.
+                result = await this.tryFill(jsonKey, val);
             }
+            
+            if (result === 'OK') {
+                actionCount++;
+                if(!activeStrategy) this.log(`Succès pour '${jsonKey}'`, '✅'); 
+                
+                // On met à jour le snapshot juste pour le debug ou les futurs besoins
+                visibleSnapshot = this.scanVisibleKeys(); 
+                
+                // La temporisation est bien conservée ici
+                await this.sleep(this.config.stepDelay);
+            } else if (result === 'SKIPPED') {
+                this.log(`Ignoré '${jsonKey}' (Déjà fait)`, '⏭️');
+            }
+            // Si result === 'ABSENT' ou 'KO', on continue simplement vers le champ suivant
+            // après avoir attendu le temps du retry (par défaut 2 secondes).
         }
         return actionCount;
     },
