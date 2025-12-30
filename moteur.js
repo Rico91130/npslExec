@@ -1,11 +1,11 @@
 /**
- * MOTEUR V8.0 - Architecture "Resolver" (Délégation Totale)
- * Le moteur ne sait plus remplir un champ, il ne sait que déléguer.
+ * MOTEUR V8.1 - Temporisation & Normalisation des Données
  */
 window.FormulaireTester = {
     abort: false,
-    config: { verbose: true, inactivityTimeout: 2000, stepDelay: 50 },
-    strategies: [], // Peuplé par strategies.js
+    // J'ai passé le stepDelay à 200ms par défaut pour plus de sécurité
+    config: { verbose: true, inactivityTimeout: 2000, stepDelay: 200 },
+    strategies: [], 
 
     // --- UTILS ---
     log: function (msg, emoji = 'ℹ️', data = null) { 
@@ -13,32 +13,19 @@ window.FormulaireTester = {
     },
     sleep: function(ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
 
-    // Fonction de recherche améliorée pour gérer les groupes
     findElement: function (key) {
-        // 1. Recherche par data-clef (Standard App)
         const container = document.querySelector(`[data-clef="${key}"]`);
         if (container) {
-            // Si le container est lui-même un champ
             if (['input', 'select', 'textarea'].includes(container.tagName.toLowerCase())) return container;
-            // Sinon on cherche dedans
             return container.querySelector('input, select, textarea');
         }
-        // 2. Fallback classique (Name / ID)
         return document.querySelector(`#${key}, [name="${key}"]`);
     },
 
-    /**
-     * COEUR DU SYSTÈME V8 : LE RESOLVER
-     * Trouve la stratégie adaptée pour un élément donné
-     */
     resolveStrategy: function(key, element, fullData) {
         if (!this.strategies || this.strategies.length === 0) return null;
-        
-        // On parcourt les stratégies dans l'ordre (Métier -> Spécifique -> Générique)
         for (const strategy of this.strategies) {
-            // Une stratégie peut avoir une condition 'isActive' optionnelle (pour le métier)
             const isActive = strategy.isActive ? strategy.isActive(key, fullData) : true;
-            
             if (isActive && strategy.matches(key, element, fullData)) {
                 return strategy;
             }
@@ -46,23 +33,27 @@ window.FormulaireTester = {
         return null;
     },
 
+    // Fonction utilitaire pour tout nettoyer d'un coup
+    normalizeData: function(data) {
+        const out = {};
+        for(const [k, v] of Object.entries(data)) {
+            // Conversion "true"/"false" -> true/false
+            if (v === "true" || v === true) out[k] = true;
+            else if (v === "false" || v === false) out[k] = false;
+            else out[k] = v;
+        }
+        return out;
+    },
+
     prepareData: function (input) {
-        let rawData = input.donnees ? input.donnees : input;
+        // On travaille déjà sur des données normalisées par runPage
+        let fullData = input; 
         let clean = {};
         
-        // Normalisation Booléens
-        const fullData = {};
-        for(const [k,v] of Object.entries(rawData)) {
-            fullData[k] = (v === "true" || v === true) ? true : ((v === "false" || v === false) ? false : v);
-        }
-
-        // Nettoyage via les stratégies (si elles définissent getIgnoredKeys)
+        // Nettoyage via les stratégies
         let keysToIgnore = new Set();
         if (this.strategies) {
             Object.keys(fullData).forEach(key => {
-                // Pour trouver la stratégie ici, on a besoin de l'élément ? 
-                // Pas forcément, les stratégies métier matchent souvent sur la clé seule.
-                // On tente une résolution sans élément pour le nettoyage statique
                 const strategy = this.resolveStrategy(key, null, fullData);
                 if (strategy && strategy.getIgnoredKeys) {
                     strategy.getIgnoredKeys(key).forEach(k => keysToIgnore.add(k));
@@ -84,26 +75,28 @@ window.FormulaireTester = {
     },
 
     /**
-     * BOUCLE PRINCIPALE (RUNNER)
+     * BOUCLE PRINCIPALE
      */
     runPage: function (scenario) {
         return new Promise((resolve, reject) => {
             this.abort = false;
-            this.pendingData = this.prepareData(scenario);
-            this.fullScenarioData = scenario.donnees || scenario; // Raw data pour context
+            
+            // 1. CORRECTION IMPORTANTE : On normalise TOUT le jeu de données dès l'entrée
+            const raw = scenario.donnees || scenario;
+            this.fullScenarioData = this.normalizeData(raw);
+            this.pendingData = this.prepareData(this.fullScenarioData);
 
             let report = []; 
             let touchedKeys = new Set();
             let silenceTimer = null;
             let observer = null;
 
-            this.log(`Démarrage V8.0 (Architecture Resolver).`, "🚀");
+            this.log(`Démarrage V8.1 (Delay: ${this.config.stepDelay}ms).`, "🚀");
 
             const finish = (reason) => {
                 if (observer) observer.disconnect();
                 if (silenceTimer) clearTimeout(silenceTimer);
                 
-                // Analyse Gap (Untouched)
                 const allDomKeys = new Set();
                 document.querySelectorAll('[data-clef]').forEach(el => {
                     if(el.offsetParent !== null) allDomKeys.add(el.getAttribute('data-clef'));
@@ -138,23 +131,14 @@ window.FormulaireTester = {
 
                 for (const [key, value] of Object.entries(this.pendingData)) {
                     
-                    // 1. Recherche de l'élément DOM
                     const element = this.findElement(key);
                     
-                    // Si pas d'élément, on ne peut rien faire (sauf si une stratégie métier pure existe, mais rare)
-                    if (!element || element.offsetParent === null) {
-                        // Element absent ou invisible
-                        continue; 
-                    }
+                    if (!element || element.offsetParent === null) continue; 
 
-                    // 2. Résolution de la Stratégie
                     const strategy = this.resolveStrategy(key, element, this.fullScenarioData);
-
                     let status = 'ABSENT';
                     
                     if (strategy) {
-                        // 3. Exécution de la stratégie
-                        // Note: C'est ici que toute la magie opère
                         try {
                             status = await strategy.execute(element, value, this.fullScenarioData, this);
                         } catch (e) {
@@ -162,19 +146,20 @@ window.FormulaireTester = {
                             status = 'KO';
                         }
                     } else {
-                        // Aucune stratégie trouvée (même pas Default Input ?)
-                        // Cela ne devrait pas arriver si Native_Input_Default est bien chargé.
-                        this.log(`Aucune stratégie pour ${key} (${element.tagName})`, '❓');
                         status = 'KO';
                     }
 
-                    // 4. Traitement du résultat
                     if (status === 'OK') {
                         this.log(`Rempli [${strategy.id}] : ${key}`, '✅');
                         report.push({ key: key, status: 'OK', time: new Date().toLocaleTimeString() });
                         touchedKeys.add(key); 
                         activityDetected = true;
                         keysToRemove.push(key);
+
+                        // --- 2. AJOUT DE LA TEMPORISATION DEMANDÉE ---
+                        // On attend un peu après chaque succès pour laisser la page respirer
+                        await this.sleep(this.config.stepDelay); 
+
                     } else if (status === 'SKIPPED') {
                         this.log(`Déjà fait : ${key}`, '⏭️');
                         report.push({ key: key, status: 'SKIPPED', time: new Date().toLocaleTimeString() });
