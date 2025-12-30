@@ -1,100 +1,135 @@
 /**
- * DASHBOARD DE CONFIGURATION
- * S'injecte sur la page d'accueil pour préparer le test.
+ * DASHBOARD V4 - Mode "Same Origin" (Pas de limite de taille)
+ * Fonctionne uniquement sur le domaine courant.
  */
 (function() {
-    // 1. Nettoyage violent de la page
-    document.body.innerHTML = '';
-    document.body.style.backgroundColor = '#f0f0f0';
-    document.body.style.fontFamily = 'Marianne, sans-serif';
-
-    // 2. Construction de l'IHM
-    const container = document.createElement('div');
-    container.style.cssText = 'max-width: 800px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
-
-    container.innerHTML = `
-        <h1 style="color:#000091; margin-bottom: 20px;">⚡ Configuration du Test Automatisé</h1>
-        
-        <div style="margin-bottom: 20px; padding: 15px; background: #e8edff; border-left: 4px solid #000091;">
-            <strong>Étape 1 :</strong> Chargez votre fichier de scénario (JSON ou Brouillon).
-        </div>
-
-        <input type="file" id="jsonInput" accept=".json" style="margin-bottom: 10px; padding: 10px; width: 100%;">
-        
-        <label style="display:block; margin-top:10px; font-weight:bold;">Contenu du scénario (Modifiable) :</label>
-        <textarea id="jsonPreview" style="width:100%; height:300px; font-family:monospace; margin-bottom: 20px; border:1px solid #ccc; padding:10px;"></textarea>
-
-        <div id="actions" style="text-align:right; border-top: 1px solid #eee; padding-top: 20px;">
-            <button id="btnLaunch" disabled style="background-color: #000091; color: white; padding: 12px 24px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; opacity: 0.5;">
-                Ouvrir la démarche &rarr;
-            </button>
-        </div>
-        <p id="errorMsg" style="color:red; display:none;"></p>
+    // --- STYLE CSS (Inchangé) ---
+    const STYLE = `
+        #mon-dashboard {
+            position: fixed; top: 50px; right: 20px; width: 400px;
+            background: #1e1e1e; color: #eee; font-family: sans-serif;
+            border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 10000; display: flex; flex-direction: column;
+            border: 1px solid #333;
+        }
+        #mon-dashboard-header {
+            padding: 10px 15px; background: #252526; border-bottom: 1px solid #333;
+            display: flex; justify-content: space-between; align-items: center;
+            border-radius: 8px 8px 0 0; font-weight: bold; cursor: move;
+        }
+        #mon-dashboard-body { padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .dash-row { display: flex; flex-direction: column; gap: 5px; }
+        .dash-label { font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+        .dash-info { font-size: 11px; color: #4ade80; background: #333; padding: 5px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        textarea {
+            width: 100%; height: 250px; background: #111; color: #4ade80;
+            border: 1px solid #333; border-radius: 4px; padding: 10px;
+            font-family: monospace; font-size: 11px; resize: vertical;
+        }
+        button {
+            background: #000091; color: white; border: none; padding: 10px;
+            border-radius: 4px; cursor: pointer; font-weight: bold;
+            transition: background 0.2s;
+        }
+        button:hover { background: #0000bd; }
+        .close-btn { background: none; border: none; color: #aaa; cursor: pointer; font-size: 16px; }
+        .close-btn:hover { color: white; }
     `;
 
-    document.body.appendChild(container);
+    // Nettoyage précédent
+    const existing = document.getElementById('mon-dashboard');
+    if (existing) existing.remove();
 
-    // 3. Logique
-    const input = document.getElementById('jsonInput');
-    const textarea = document.getElementById('jsonPreview');
-    const btn = document.getElementById('btnLaunch');
-    const errorMsg = document.getElementById('errorMsg');
+    if (!document.getElementById('dash-style')) {
+        const styleEl = document.createElement('style');
+        styleEl.id = 'dash-style';
+        styleEl.textContent = STYLE;
+        document.head.appendChild(styleEl);
+    }
 
-    // Chargement fichier
-    input.onchange = (e) => {
-        const file = e.target.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-            try {
-                // Formattage joli du JSON
-                const obj = JSON.parse(evt.target.result);
-                textarea.value = JSON.stringify(obj, null, 4);
-                textarea.dispatchEvent(new Event('input')); // Déclenche la validation
-            } catch(err) {
-                alert("JSON Invalide");
-            }
-        };
-        reader.readAsText(file);
-    };
+    const dash = document.createElement('div');
+    dash.id = 'mon-dashboard';
+    
+    // Récupération du JSON sauvegardé (Local Storage est spécifique au domaine, donc pas de conflit Prod/Qualif)
+    const savedJson = localStorage.getItem('TEST_SCENARIO') || '{\n  "codeDemarche": "PVPP",\n  "donnees": {\n    \n  }\n}';
+    
+    // Détection de l'origine actuelle
+    const currentOrigin = window.location.origin;
 
-    // Validation & Extraction Code Démarche
-    textarea.oninput = () => {
+    dash.innerHTML = `
+        <div id="mon-dashboard-header">
+            <span>🎛️ NPSL Tester (Mode Local)</span>
+            <button class="close-btn" onclick="document.getElementById('mon-dashboard').remove()">✕</button>
+        </div>
+        <div id="mon-dashboard-body">
+            
+            <div class="dash-row">
+                <label class="dash-label">Origine détectée</label>
+                <div class="dash-info" title="${currentOrigin}">${currentOrigin}</div>
+            </div>
+
+            <div class="dash-row">
+                <label class="dash-label">Données de test (JSON)</label>
+                <textarea id="dash-json" spellcheck="false" placeholder="Collez votre JSON ici...">${savedJson}</textarea>
+            </div>
+
+            <button id="btn-run-local">▶ Sauvegarder et Lancer ici</button>
+        </div>
+    `;
+
+    document.body.appendChild(dash);
+
+    // --- LOGIQUE ---
+    const btnRun = document.getElementById('btn-run-local');
+    const txtJson = document.getElementById('dash-json');
+
+    btnRun.onclick = () => {
         try {
-            const data = JSON.parse(textarea.value);
-            // Sauvegarde dans localStorage pour la suite
-            localStorage.setItem('TEST_SCENARIO', JSON.stringify(data));
+            const jsonStr = txtJson.value;
+            const jsonObj = JSON.parse(jsonStr); // Validation JSON
             
-            // Tentative de trouver le code démarche (souvent à la racine ou déduit)
-            // Dans votre exemple pvpp.json : "codeDemarche": "PVPP"
-            // Dans le brouillon : non présent, il faut le deviner ou le demander.
-            let code = data.codeDemarche || data.donnees?.codeDemarche;
-            
-            if(code) {
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.onclick = () => {
-                    const url = `https://demarches.service-public.gouv.fr/mademarche/demarcheGenerique/?codeDemarche=${code}`;
-                    window.location.href = url;
-                };
-                errorMsg.style.display = 'none';
-            } else {
-                // Fallback si pas de code démarche dans le JSON
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.innerText = "Lancer (Code démarche inconnu)";
-                btn.onclick = () => {
-                    const codeManuel = prompt("Code démarche non trouvé dans le JSON. Entrez le code (ex: PVPP) :");
-                    if(codeManuel) {
-                        window.location.href = `https://demarches.service-public.gouv.fr/mademarche/demarcheGenerique/?codeDemarche=${codeManuel}`;
-                    }
-                };
+            if (!jsonObj.codeDemarche) {
+                alert("⚠️ Erreur : La propriété 'codeDemarche' est manquante dans le JSON.");
+                return;
             }
-        } catch(e) {
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            errorMsg.innerText = "JSON invalide : " + e.message;
-            errorMsg.style.display = 'block';
+
+            // 1. Sauvegarde dans le localStorage DU DOMAINE COURANT
+            // Comme on est sur la même origine, pas de limite de taille URL.
+            localStorage.setItem('TEST_SCENARIO', jsonStr);
+            console.log("[Dashboard] Scénario sauvegardé en local.");
+
+            // 2. Construction de l'URL cible (Relative ou Absolue sur même domaine)
+            // On reste sur la même origine, on change juste le path.
+            const targetPath = `/mademarche/${jsonObj.codeDemarche}/demarche`;
+            
+            // 3. Navigation
+            // On vérifie si on est déjà sur la bonne page pour éviter un rechargement inutile ?
+            // Non, pour un test, il vaut mieux recharger proprement la page.
+            console.log(`[Dashboard] Redirection vers ${targetPath}`);
+            window.location.assign(targetPath);
+            
+        } catch (e) {
+            alert("❌ JSON Invalide : " + e.message);
         }
     };
+
+    // Drag & Drop
+    const header = document.getElementById('mon-dashboard-header');
+    let isDown = false, offset = [0,0];
+    
+    header.onmousedown = (e) => {
+        isDown = true;
+        offset = [dash.offsetLeft - e.clientX, dash.offsetTop - e.clientY];
+    };
+    
+    document.onmouseup = () => isDown = false;
+    
+    document.onmousemove = (e) => {
+        if (isDown) {
+            dash.style.left = (e.clientX + offset[0]) + 'px';
+            dash.style.top  = (e.clientY + offset[1]) + 'px';
+            dash.style.right = 'auto'; 
+        }
+    };
+
 })();

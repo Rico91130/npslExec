@@ -1,6 +1,5 @@
 (function(){
     const REPO = "https://raw.githubusercontent.com/Rico91130/npslExec/main/";
-
     const TS = Date.now(); 
     
     const FILES = [
@@ -9,7 +8,7 @@
         { name: 'toolbar.js', key: 'MON_TOOLBAR' }
     ];
 
-    console.log(`[Boot] Démarrage de la mise à jour (TS: ${TS})...`);
+    console.log(`[Boot] Chargement des outils (TS: ${TS})...`);
 
     Promise.all(FILES.map(f => 
         fetch(REPO + f.name + '?t=' + TS)
@@ -20,9 +19,14 @@
         .then(c => localStorage.setItem(f.key, c))
     ))
     .then(() => {
-        console.log("[Boot] Mise à jour terminée.");
-        const dashCode = localStorage.getItem('MON_DASHBOARD');
-        if(dashCode) window.eval(dashCode);
+        console.log("[Boot] Outils chargés avec succès.");
+        if (window.location.href.includes('/demarche') && localStorage.getItem('TEST_SCENARIO')) {
+             const toolbarCode = localStorage.getItem('MON_TOOLBAR');
+             if(toolbarCode) window.eval(toolbarCode);
+        } else {
+             const dashCode = localStorage.getItem('MON_DASHBOARD');
+             if(dashCode) window.eval(dashCode);
+        }
     })
     .catch(e => alert("Erreur Bootloader : " + e));
 })();
