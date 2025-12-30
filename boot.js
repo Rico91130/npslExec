@@ -3,9 +3,10 @@
     const TS = Date.now(); 
     
     const FILES = [
-        { name: 'moteur.js', key: 'MON_MOTEUR_LIB' },
-        { name: 'dashboard.js', key: 'MON_DASHBOARD' },
-        { name: 'toolbar.js', key: 'MON_TOOLBAR' }
+        { name: 'moteur.js', key: 'TESTER_MOTEUR' },
+        { name: 'strategies.js', key: 'TESTER_STRATEGIES' },
+        { name: 'dashboard.js', key: 'TESTER_DASHBOARD' },
+        { name: 'toolbar.js', key: 'TESTER_TOOLBAR' }
     ];
 
     console.log(`[Boot] Chargement des outils (TS: ${TS})...`);
@@ -20,11 +21,11 @@
     ))
     .then(() => {
         console.log("[Boot] Outils chargés avec succès.");
-        if (window.location.href.includes('/demarche') && localStorage.getItem('TEST_SCENARIO')) {
-             const toolbarCode = localStorage.getItem('MON_TOOLBAR');
+        if (window.location.href.includes('/demarche') && localStorage.getItem('TESTER_SCENARIO')) {
+             const toolbarCode = localStorage.getItem('TESTER_TOOLBAR');
              if(toolbarCode) window.eval(toolbarCode);
         } else {
-             const dashCode = localStorage.getItem('MON_DASHBOARD');
+             const dashCode = localStorage.getItem('TESTER_DASHBOARD');
              if(dashCode) window.eval(dashCode);
         }
     })

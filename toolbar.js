@@ -3,15 +3,23 @@
  */
 (function() {
     // 0. Init
-    const engineCode = localStorage.getItem('MON_MOTEUR_LIB');
-    const scenarioStr = localStorage.getItem('TEST_SCENARIO');
+    const engineCode = localStorage.getItem('TESTER_MOTEUR');
+    const strategiesCode = localStorage.getItem('MES_STRATEGIES');
+    const scenarioStr = localStorage.getItem('TESTER_SCENARIO');
     
     if(!engineCode || !scenarioStr) {
         alert("⚠️ Configuration manquante. Passez par le Dashboard d'abord.");
         return;
     }
     
-    if(!window.FormulaireTester) window.eval(engineCode);
+    // Chargement séquencé
+    if(!window.FormulaireTester) {
+        window.eval(engineCode); // 1. On charge le moteur
+        if (strategiesCode) {
+            window.eval(strategiesCode); // 2. On injecte les stratégies
+        }
+    }
+
     window.FormulaireTester.abort = false;
     const SCENARIO = JSON.parse(scenarioStr);
 

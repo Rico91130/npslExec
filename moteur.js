@@ -1,114 +1,16 @@
 /**
- * MOTEUR V7.3 - Avec détection des champs non remplis (Gap Analysis)
+ * MOTEUR V7.4 - Noyau Technique (Sans Règles Métier)
  */
 window.FormulaireTester = {
     abort: false,
     config: { verbose: true, inactivityTimeout: 2000, stepDelay: 50 },
 
-    // --- STRATÉGIES
-    strategies: [
-        {
-            id: 'AdresseBanOuManuelle_SaisieManuelle',
-            matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
-
-            isActive: (key, fullData) => {
-                const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
-                return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
-            },
-
-            getIgnoredKeys: (key) => {
-                const base = key.replace('_nomLong', '');
-                return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
-                    .map(suffix => base + suffix);
-            },
-
-            customFill: async function (key, value, fullData, engine) {
-                const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
-                const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
-                const inputTargetKey = key.replace('_nomLong', '');
-
-                // 1. CHECKBOX
-                const checkboxEl = engine.findElement(checkboxKey);
-                if (checkboxEl && !checkboxEl.checked) {
-                    engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
-                    checkboxEl.click();
-                    return 'PENDING';
-                }
-
-                // 2. VALEUR CIBLE
-                const cp = fullData[`${prefix}_communeActuelleAdresseManuelle_codePostal`];
-                const nom = fullData[`${prefix}_communeActuelleAdresseManuelle_nom`];
-                let textToType = value;
-                if (cp && nom) textToType = `${cp} ${nom}`;
-
-                const inputEl = engine.findElement(inputTargetKey);
-
-                if (inputEl) {
-                    // 3. GESTION LISTE (Avec Temporisation)
-                    const allOptions = document.querySelectorAll('mat-option');
-                    // On filtre pour être sûr qu'ils sont affichés
-                    const visibleOptions = Array.from(allOptions).filter(opt => opt.offsetParent !== null);
-
-                    if (visibleOptions.length > 0) {
-                        const targetOption = visibleOptions[0];
-                        const targetText = targetOption.innerText.trim();
-
-                        // Sécurité de correspondance
-                        if (targetText.includes(nom) || targetText.includes(cp)) {
-
-                            // On a trouvé l'option, mais on attend un peu pour être sûr 
-                            // que l'animation d'ouverture d'Angular est terminée.
-                            engine.log(`[Stratégie] Option trouvée. Pause stabilisation...`, '⏳');
-                            await engine.sleep(300); // 300ms de pause explicite
-
-                            engine.log(`[Stratégie] Clic natif sur "${targetText}"`, 'point_up');
-                            targetOption.click();
-
-                            // Petite pause post-clic pour laisser le champ se mettre à jour
-                            await engine.sleep(100);
-
-                            // Vérification finale : si le clic n'a pas marché, on force
-                            if (!inputEl.value.includes(nom)) {
-                                engine.log(`[Stratégie] Le clic a échoué, forçage valeur.`, '🔧');
-                                inputEl.value = targetText;
-                                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                                inputEl.blur();
-                            }
-
-                            return 'OK';
-                        }
-                    }
-
-                    // 4. SAISIE (Si nécessaire)
-                    if (inputEl.value !== textToType) {
-                        engine.log(`[Stratégie] Saisie : "${textToType}"`, '⌨️');
-                        engine.fillField(inputEl, textToType);
-
-                        // Focus pour ouvrir la liste
-                        inputEl.focus();
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-
-                        return 'PENDING';
-                    }
-
-                    // 5. ATTENTE LISTE
-                    if (document.activeElement !== inputEl) {
-                        inputEl.focus();
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-
-                    return 'PENDING';
-                }
-
-                return 'ABSENT';
-            }
-        }
-    ],
-
+    // Initialisé à vide. Sera peuplé par strategies.js
+    strategies: [], 
 
     // --- UTILS ---
     log: function (msg, emoji = 'ℹ️', data = null) { if (this.config.verbose) console.log(`%c[TESTER] ${emoji} ${msg}`, 'color: #cd094f; font-weight: bold;', data || ''); },
-    sleep: function (ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
+    sleep: function(ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
 
     /**
      * Point d'entrée principal
@@ -117,36 +19,26 @@ window.FormulaireTester = {
         return new Promise((resolve, reject) => {
             this.abort = false;
             this.pendingData = this.prepareData(scenario);
-            this.fullScenarioData = scenario.donnees || scenario;
+            this.fullScenarioData = scenario.donnees || scenario; 
 
-            // Historique
-            let report = [];
-            // Set des clés traitées pour comparaison finale
+            let report = []; 
             let touchedKeys = new Set();
-
             let silenceTimer = null;
             let observer = null;
 
-            this.log(`Démarrage V7.3.`, "🚀");
+            this.log(`Démarrage V7.4 (Core).`, "🚀");
 
             const finish = (reason) => {
                 if (observer) observer.disconnect();
                 if (silenceTimer) clearTimeout(silenceTimer);
-
-                // --- ANALYSE DES CHAMPS MANQUANTS (NOUVEAU) ---
+                
                 const allDomKeys = new Set();
                 document.querySelectorAll('[data-clef]').forEach(el => {
-                    // On ne prend que les éléments visibles pour ne pas polluer avec des champs hidden
-                    if (el.offsetParent !== null) {
-                        allDomKeys.add(el.getAttribute('data-clef'));
-                    }
+                    if(el.offsetParent !== null) allDomKeys.add(el.getAttribute('data-clef'));
                 });
 
-                // Calcul de la différence : (Tout ce qu'il y a sur la page) - (Tout ce qu'on a touché)
-                // On filtre aussi les clés qui commencent par une clé déjà touchée (pour les sous-composants)
                 const untouched = Array.from(allDomKeys).filter(domKey => {
                     if (touchedKeys.has(domKey)) return false;
-                    // Si une stratégie a géré le parent, on ignore les enfants (ex: adresseDeclarant gère adresseDeclarant_voie)
                     for (let touched of touchedKeys) {
                         if (domKey.startsWith(touched + '_')) return false;
                     }
@@ -154,12 +46,11 @@ window.FormulaireTester = {
                 });
 
                 this.log(`Terminé (${reason}).`, "🏁");
-
-                resolve({
+                resolve({ 
                     totalFilled: report.filter(x => x.status === 'OK').length,
                     reason: reason,
                     details: report,
-                    untouched: untouched // On renvoie la liste des orphelins
+                    untouched: untouched 
                 });
             };
 
@@ -195,14 +86,14 @@ window.FormulaireTester = {
                     if (status === 'OK') {
                         this.log(`Rempli : ${key}`, '✅');
                         report.push({ key: key, status: 'OK', time: new Date().toLocaleTimeString() });
-                        touchedKeys.add(key); // Marqué comme traité
+                        touchedKeys.add(key); 
                         activityDetected = true;
                         keysToRemove.push(key);
                     } else if (status === 'SKIPPED') {
                         this.log(`Déjà fait : ${key}`, '⏭️');
                         report.push({ key: key, status: 'SKIPPED', time: new Date().toLocaleTimeString() });
-                        touchedKeys.add(key); // Marqué comme traité
-                        keysToRemove.push(key);
+                        touchedKeys.add(key); 
+                        keysToRemove.push(key); 
                     } else if (status === 'PENDING') {
                         activityDetected = true;
                     }
@@ -230,8 +121,13 @@ window.FormulaireTester = {
 
     findStrategy: function (key, fullData) {
         const normalizedData = this.normalizeBooleans(fullData);
+        // On utilise this.strategies qui aura été peuplé par strategies.js
+        if (!this.strategies) return undefined;
         return this.strategies.find(s => s.matches(key) && s.isActive(key, normalizedData));
     },
+
+    // ... LES FONCTIONS SUIVANTES SONT INCHANGÉES ...
+    // (Copie ici prepareData, normalizeBooleans, findElement, isValueAlreadySet, fillField depuis la version précédente)
     prepareData: function (input) {
         let rawData = input.donnees ? input.donnees : input;
         let clean = {};

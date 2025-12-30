@@ -6,7 +6,7 @@
     console.log("🖥️ Lancement du Client de Test PVPP...");
 
     // 1. Récupération & Chargement du Moteur (Library)
-    const engineCode = localStorage.getItem('MON_MOTEUR_LIB');
+    const engineCode = localStorage.getItem('TESTER_MOTEUR');
     if (!engineCode) {
         alert("⚠️ Moteur introuvable ! Veuillez lancer le bookmarklet 'Mise à jour' depuis la page d'accueil.");
         return;

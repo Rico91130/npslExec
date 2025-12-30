@@ -86,7 +86,7 @@
     }
 
     // 2. Récupération Données
-    const savedJson = localStorage.getItem('TEST_SCENARIO') || '';
+    const savedJson = localStorage.getItem('TESTER_SCENARIO') || '';
     const currentOrigin = window.location.origin;
 
     // 3. Construction du DOM
@@ -171,7 +171,7 @@
             }
 
             // Sauvegarde
-            localStorage.setItem('TEST_SCENARIO', jsonStr);
+            localStorage.setItem('TESTER_SCENARIO', jsonStr);
 
             // Construction URL (CORRIGÉE)
             // Ancien : /mademarche/${code}/demarche
