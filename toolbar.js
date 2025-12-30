@@ -1,29 +1,50 @@
-/**
- * TOOLBAR V4 - Avec Tiroir de Détails + Champs Non Remplis
- */
 (function() {
-    // 0. Init
+    // 0. CHARGEMENT ET INITIALISATION DU MOTEUR
     const engineCode = localStorage.getItem('TESTER_MOTEUR');
-    const strategiesCode = localStorage.getItem('MES_STRATEGIES');
+    const strategiesCode = localStorage.getItem('TESTER_STRATEGIES');
     const scenarioStr = localStorage.getItem('TESTER_SCENARIO');
     
     if(!engineCode || !scenarioStr) {
-        alert("⚠️ Configuration manquante. Passez par le Dashboard d'abord.");
+        alert("⚠️ Configuration manquante (Moteur ou Scénario absent).");
         return;
     }
-    
-    // Chargement séquencé
+
+    // Étape A : On charge le moteur (qui crée window.FormulaireTester)
     if(!window.FormulaireTester) {
-        window.eval(engineCode); // 1. On charge le moteur
-        if (strategiesCode) {
-            window.eval(strategiesCode); // 2. On injecte les stratégies
+        try {
+            window.eval(engineCode);
+        } catch(e) {
+            console.error("❌ Erreur critique dans moteur.js :", e);
+            alert("Erreur de syntaxe dans le moteur (voir console).");
+            return;
         }
     }
 
+    // Étape B : On charge les stratégies (qui crée window.NPSL_STRATEGIES)
+    if (strategiesCode) {
+        try {
+            window.eval(strategiesCode);
+        } catch(e) {
+            console.error("❌ Erreur critique dans strategies.js :", e);
+            alert("Erreur de syntaxe dans les stratégies (voir console).");
+        }
+    }
+
+    // Étape C : LE MARIAGE (Injection explicite)
+    if (window.FormulaireTester && window.NPSL_STRATEGIES) {
+        window.FormulaireTester.strategies = window.NPSL_STRATEGIES;
+        console.log(`✅ [Toolbar] Injection réussie : ${window.NPSL_STRATEGIES.length} stratégies connectées au moteur.`);
+    } else {
+        console.warn("⚠️ [Toolbar] Problème d'injection : Moteur ou Stratégies manquants.");
+        console.log("Status Moteur:", !!window.FormulaireTester);
+        console.log("Status Stratégies:", !!window.NPSL_STRATEGIES);
+    }
+    
+    // Initialisation du flag
     window.FormulaireTester.abort = false;
     const SCENARIO = JSON.parse(scenarioStr);
 
-    // 1. UI
+    // 1. UI (Reste identique à la V5/V4 avec le tiroir)
     if(document.getElementById('test-toolbar')) return;
 
     // --- LE TIROIR ---
