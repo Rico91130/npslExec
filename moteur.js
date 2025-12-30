@@ -1,126 +1,16 @@
 /**
- * MOTEUR V7.0 - Architecture Événementielle (Global Observer)
- * Logique inversée : On observe le DOM et on tire dans le tas dès qu'une cible apparaît.
+ * MOTEUR V7.2 - Retourne un rapport détaillé pour la Toolbar
  */
 window.FormulaireTester = {
+    abort: false,
+    config: { verbose: true, inactivityTimeout: 2000, stepDelay: 50 },
 
-    abort: false, // Flag d'arrêt manuel
+    // ... (Garder les STRATÉGIES inchangées) ...
+    strategies: [ /* ... copie tes stratégies ici ... */ ],
 
-    config: {
-        verbose: true,
-        inactivityTimeout: 2000, // Temps de calme plat avant de considérer le test terminé
-        stepDelay: 50    // Délai minime pour laisser le moteur de rendu respirer
-    },
-
-    // --- STRATÉGIES (Adaptées pour ne pas bloquer le flux) ---
-    strategies: [
- {
-            id: 'AdresseBanOuManuelle_SaisieManuelle',
-            matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong'),
-            
-            isActive: (key, fullData) => {
-                const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
-                return fullData[`${prefix}_utiliserAdresseManuelle`] === true;
-            },
-
-            getIgnoredKeys: (key) => {
-                const base = key.replace('_nomLong', ''); 
-                return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
-                       .map(suffix => base + suffix);
-            },
-
-            customFill: async function(key, value, fullData, engine) {
-                const prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
-                const checkboxKey = `${prefix}_utiliserAdresseManuelle`;
-                const inputTargetKey = key.replace('_nomLong', ''); 
-
-                // 1. CHECKBOX
-                const checkboxEl = engine.findElement(checkboxKey);
-                if (checkboxEl && !checkboxEl.checked) {
-                    engine.log(`[Stratégie] Clic 'Adresse Manuelle'`, '☑️');
-                    checkboxEl.click();
-                    return 'PENDING';
-                }
-
-                // 2. VALEUR CIBLE
-                const cp = fullData[`${prefix}_communeActuelleAdresseManuelle_codePostal`];
-                const nom = fullData[`${prefix}_communeActuelleAdresseManuelle_nom`];
-                let textToType = value; 
-                if (cp && nom) textToType = `${cp} ${nom}`;
-
-                const inputEl = engine.findElement(inputTargetKey);
-                
-                if (inputEl) {
-                    // 3. GESTION LISTE (Avec Temporisation)
-                    const allOptions = document.querySelectorAll('mat-option');
-                    // On filtre pour être sûr qu'ils sont affichés
-                    const visibleOptions = Array.from(allOptions).filter(opt => opt.offsetParent !== null);
-                    
-                    if (visibleOptions.length > 0) {
-                        const targetOption = visibleOptions[0];
-                        const targetText = targetOption.innerText.trim();
-
-                        // Sécurité de correspondance
-                        if(targetText.includes(nom) || targetText.includes(cp)) {
-                             
-                             // On a trouvé l'option, mais on attend un peu pour être sûr 
-                             // que l'animation d'ouverture d'Angular est terminée.
-                             engine.log(`[Stratégie] Option trouvée. Pause stabilisation...`, '⏳');
-                             await engine.sleep(300); // 300ms de pause explicite
-
-                             engine.log(`[Stratégie] Clic natif sur "${targetText}"`, 'point_up');
-                             targetOption.click();
-
-                             // Petite pause post-clic pour laisser le champ se mettre à jour
-                             await engine.sleep(100);
-
-                             // Vérification finale : si le clic n'a pas marché, on force
-                             if (!inputEl.value.includes(nom)) {
-                                 engine.log(`[Stratégie] Le clic a échoué, forçage valeur.`, '🔧');
-                                 inputEl.value = targetText;
-                                 inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                                 inputEl.blur();
-                             }
-
-                             return 'OK'; 
-                        }
-                    }
-
-                    // 4. SAISIE (Si nécessaire)
-                    if (inputEl.value !== textToType) {
-                        engine.log(`[Stratégie] Saisie : "${textToType}"`, '⌨️');
-                        engine.fillField(inputEl, textToType);
-                        
-                        // Focus pour ouvrir la liste
-                        inputEl.focus(); 
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                        
-                        return 'PENDING'; 
-                    }
-
-                    // 5. ATTENTE LISTE
-                    if (document.activeElement !== inputEl) {
-                        inputEl.focus();
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-
-                    return 'PENDING'; 
-                }
-
-                return 'ABSENT'; 
-            }
-        }
-    ],
-
-    log: function (msg, emoji = 'ℹ️', data = null) {
-        if (this.config.verbose) {
-            console.log(`%c[TESTER] ${emoji} ${msg}`, 'color: #cd094f; font-weight: bold;', data || '');
-        }
-    },
-
-    sleep: function(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    },
+    // ... (Garder LOG et SLEEP inchangés) ...
+    log: function (msg, emoji = 'ℹ️', data = null) { if (this.config.verbose) console.log(`%c[TESTER] ${emoji} ${msg}`, 'color: #cd094f; font-weight: bold;', data || ''); },
+    sleep: function(ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
 
     /**
      * Point d'entrée principal
@@ -128,53 +18,46 @@ window.FormulaireTester = {
     runPage: function (scenario) {
         return new Promise((resolve, reject) => {
             this.abort = false;
-
-            // 1. Préparation des données "en attente"
-            // On fait une copie pour pouvoir supprimer les clés au fur et à mesure
             this.pendingData = this.prepareData(scenario);
-            this.fullScenarioData = scenario.donnees || scenario; // Gardé pour référence (stratégies)
+            this.fullScenarioData = scenario.donnees || scenario; 
 
-            let totalFilled = 0;
+            // CHANGEMENT V7.2 : On stocke l'historique des actions
+            let report = []; // [{ key: 'nom', status: 'OK', msg: 'Rempli' }, ...]
             let silenceTimer = null;
             let observer = null;
 
-            this.log(`Démarrage V7. Données à traiter : ${Object.keys(this.pendingData).length}`, "🚀");
+            this.log(`Démarrage V7.2.`, "🚀");
 
-            // --- FONCTION DE FIN ---
             const finish = (reason) => {
                 if (observer) observer.disconnect();
                 if (silenceTimer) clearTimeout(silenceTimer);
-                this.log(`Terminé (${reason}). Champs remplis : ${totalFilled}`, "🏁");
-                resolve(totalFilled);
+                this.log(`Terminé (${reason}).`, "🏁");
+                // CHANGEMENT V7.2 : On renvoie l'objet rapport complet
+                resolve({ 
+                    totalFilled: report.filter(x => x.status === 'OK').length,
+                    reason: reason,
+                    details: report 
+                });
             };
 
-            // --- FONCTION DE RESET DU TIMER ---
             const bumpTimer = () => {
                 if (silenceTimer) clearTimeout(silenceTimer);
-                silenceTimer = setTimeout(() => {
-                    finish("Timeout Inactivité");
-                }, this.config.inactivityTimeout);
+                silenceTimer = setTimeout(() => { finish("Timeout Inactivité"); }, this.config.inactivityTimeout);
             };
 
-            // --- FONCTION DE SCAN (Le coeur) ---
             const scanAndFill = async () => {
                 if (this.abort) { finish("Arrêt Utilisateur"); return; }
 
                 let activityDetected = false;
                 const keysToRemove = [];
 
-                // On parcourt tout ce qui reste à remplir
                 for (const [key, value] of Object.entries(this.pendingData)) {
-
-                    // 1. Stratégie ou Standard ?
                     const strategy = this.findStrategy(key, this.fullScenarioData);
                     let status = 'ABSENT';
 
                     if (strategy && strategy.customFill) {
-                        // La stratégie gère sa propre logique (clic, check...)
                         status = await strategy.customFill(key, value, this.fullScenarioData, this);
                     } else {
-                        // Mode standard : on cherche l'élément
                         const el = this.findElement(key);
                         if (el && el.offsetParent !== null) {
                             if (this.isValueAlreadySet(el, value)) {
@@ -186,69 +69,41 @@ window.FormulaireTester = {
                         }
                     }
 
-                    // 2. Traitement du résultat
+                    // CHANGEMENT V7.2 : Construction du rapport
                     if (status === 'OK') {
                         this.log(`Rempli : ${key}`, '✅');
-                        totalFilled++;
+                        report.push({ key: key, status: 'OK', time: new Date().toLocaleTimeString() });
                         activityDetected = true;
                         keysToRemove.push(key);
                     } else if (status === 'SKIPPED') {
                         this.log(`Déjà fait : ${key}`, '⏭️');
-                        keysToRemove.push(key); // On l'enlève de la liste car c'est fini
+                        report.push({ key: key, status: 'SKIPPED', time: new Date().toLocaleTimeString() });
+                        keysToRemove.push(key); 
                     } else if (status === 'PENDING') {
-                        // La stratégie a fait une action (ex: clic checkbox) mais n'a pas fini (attend l'input)
-                        // On considère ça comme une activité pour reset le timer
                         activityDetected = true;
                     }
-                    // Si 'ABSENT', on ne fait rien, on garde la clé dans pendingData pour le prochain tour
+                    // 'ABSENT' n'est pas logué dans le rapport final pour ne pas polluer (car c'est temporaire)
                 }
 
-                // Nettoyage des clés traitées
                 keysToRemove.forEach(k => delete this.pendingData[k]);
 
-                // Si on a tout fini
                 if (Object.keys(this.pendingData).length === 0) {
                     finish("Succès - Plus de données");
                     return;
                 }
-
-                // Si on a bougé quelque chose, on repousse la fin du monde
                 if (activityDetected) bumpTimer();
             };
 
-            // --- INITIALISATION OBSERVER ---
             observer = new MutationObserver((mutations) => {
-                // On s'intéresse aux ajouts de noeuds ou changements d'attributs (ex: disabled -> enabled)
-                const relevantMutation = mutations.some(m =>
-                    m.type === 'childList' && m.addedNodes.length > 0 ||
-                    m.type === 'attributes' && (m.attributeName === 'disabled' || m.attributeName === 'style' || m.attributeName === 'class')
-                );
-
-                if (relevantMutation) {
-                    // On relance un scan car le terrain a changé
-                    bumpTimer(); // Le DOM bouge, donc on est vivant
-                    scanAndFill();
-                }
+                const relevant = mutations.some(m => m.type === 'childList' && m.addedNodes.length > 0 || m.type === 'attributes');
+                if (relevant) { bumpTimer(); scanAndFill(); }
             });
 
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true, // On surveille aussi les attributs (visibilité/disabled)
-                attributeFilter: ['style', 'class', 'disabled', 'hidden']
-            });
-
-            // Premier scan au démarrage (pour les champs déjà présents)
+            observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'disabled', 'hidden'] });
             bumpTimer();
             scanAndFill();
         });
     },
-
-    // --- UTILS (Inchangés) ---
-
-    // (Garde ici tes fonctions findStrategy, prepareData, findElement, fillField, normalizeBooleans...)
-    // ... Je ne les répète pas pour alléger la lecture, mais il faut les inclure !
-    // Copie-colle les fonctions "Utils" de la V6.1 ci-dessous.
 
     findStrategy: function (key, fullData) {
         const normalizedData = this.normalizeBooleans(fullData);
@@ -259,7 +114,6 @@ window.FormulaireTester = {
         let rawData = input.donnees ? input.donnees : input;
         let clean = {};
         const fullRawData = this.normalizeBooleans(rawData);
-
         let keysToIgnore = new Set();
         Object.keys(fullRawData).forEach(key => {
             const strategy = this.findStrategy(key, fullRawData);
@@ -267,15 +121,12 @@ window.FormulaireTester = {
                 strategy.getIgnoredKeys(key).forEach(k => keysToIgnore.add(k));
             }
         });
-
         for (const [key, val] of Object.entries(fullRawData)) {
             if (val === null || val === "") continue;
             if (keysToIgnore.has(key)) continue;
-
             let finalKey = key;
             if (key.endsWith('_libelle')) finalKey = key.replace('_libelle', '');
             if (key.endsWith('_valeur') && fullRawData[key.replace('_valeur', '_libelle')]) continue;
-
             clean[finalKey] = val;
         }
         return clean;
@@ -308,7 +159,6 @@ window.FormulaireTester = {
             el.focus();
             const tag = el.tagName.toLowerCase();
             const type = el.type ? el.type.toLowerCase() : '';
-
             if (type === 'checkbox' || type === 'radio') {
                 if (el.checked !== val) el.click();
             } else if (tag === 'select') {
