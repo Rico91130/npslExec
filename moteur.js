@@ -1,42 +1,113 @@
 /**
- * MOTEUR V7.4 - Noyau Technique (Sans Règles Métier)
+ * MOTEUR V8.0 - Architecture "Resolver" (Délégation Totale)
+ * Le moteur ne sait plus remplir un champ, il ne sait que déléguer.
  */
 window.FormulaireTester = {
     abort: false,
     config: { verbose: true, inactivityTimeout: 2000, stepDelay: 50 },
-
-    // Initialisé à vide. Sera peuplé par strategies.js
-    strategies: [], 
+    strategies: [], // Peuplé par strategies.js
 
     // --- UTILS ---
-    log: function (msg, emoji = 'ℹ️', data = null) { if (this.config.verbose) console.log(`%c[TESTER] ${emoji} ${msg}`, 'color: #cd094f; font-weight: bold;', data || ''); },
+    log: function (msg, emoji = 'ℹ️', data = null) { 
+        if (this.config.verbose) console.log(`%c[TESTER] ${emoji} ${msg}`, 'color: #cd094f; font-weight: bold;', data || ''); 
+    },
     sleep: function(ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
 
+    // Fonction de recherche améliorée pour gérer les groupes
+    findElement: function (key) {
+        // 1. Recherche par data-clef (Standard App)
+        const container = document.querySelector(`[data-clef="${key}"]`);
+        if (container) {
+            // Si le container est lui-même un champ
+            if (['input', 'select', 'textarea'].includes(container.tagName.toLowerCase())) return container;
+            // Sinon on cherche dedans
+            return container.querySelector('input, select, textarea');
+        }
+        // 2. Fallback classique (Name / ID)
+        return document.querySelector(`#${key}, [name="${key}"]`);
+    },
+
     /**
-     * Point d'entrée principal
+     * COEUR DU SYSTÈME V8 : LE RESOLVER
+     * Trouve la stratégie adaptée pour un élément donné
+     */
+    resolveStrategy: function(key, element, fullData) {
+        if (!this.strategies || this.strategies.length === 0) return null;
+        
+        // On parcourt les stratégies dans l'ordre (Métier -> Spécifique -> Générique)
+        for (const strategy of this.strategies) {
+            // Une stratégie peut avoir une condition 'isActive' optionnelle (pour le métier)
+            const isActive = strategy.isActive ? strategy.isActive(key, fullData) : true;
+            
+            if (isActive && strategy.matches(key, element, fullData)) {
+                return strategy;
+            }
+        }
+        return null;
+    },
+
+    prepareData: function (input) {
+        let rawData = input.donnees ? input.donnees : input;
+        let clean = {};
+        
+        // Normalisation Booléens
+        const fullData = {};
+        for(const [k,v] of Object.entries(rawData)) {
+            fullData[k] = (v === "true" || v === true) ? true : ((v === "false" || v === false) ? false : v);
+        }
+
+        // Nettoyage via les stratégies (si elles définissent getIgnoredKeys)
+        let keysToIgnore = new Set();
+        if (this.strategies) {
+            Object.keys(fullData).forEach(key => {
+                // Pour trouver la stratégie ici, on a besoin de l'élément ? 
+                // Pas forcément, les stratégies métier matchent souvent sur la clé seule.
+                // On tente une résolution sans élément pour le nettoyage statique
+                const strategy = this.resolveStrategy(key, null, fullData);
+                if (strategy && strategy.getIgnoredKeys) {
+                    strategy.getIgnoredKeys(key).forEach(k => keysToIgnore.add(k));
+                }
+            });
+        }
+
+        for (const [key, val] of Object.entries(fullData)) {
+            if (val === null || val === "") continue;
+            if (keysToIgnore.has(key)) continue;
+            
+            let finalKey = key;
+            if (key.endsWith('_libelle')) finalKey = key.replace('_libelle', '');
+            if (key.endsWith('_valeur') && fullData[key.replace('_valeur', '_libelle')]) continue;
+            
+            clean[finalKey] = val;
+        }
+        return clean;
+    },
+
+    /**
+     * BOUCLE PRINCIPALE (RUNNER)
      */
     runPage: function (scenario) {
         return new Promise((resolve, reject) => {
             this.abort = false;
             this.pendingData = this.prepareData(scenario);
-            this.fullScenarioData = scenario.donnees || scenario; 
+            this.fullScenarioData = scenario.donnees || scenario; // Raw data pour context
 
             let report = []; 
             let touchedKeys = new Set();
             let silenceTimer = null;
             let observer = null;
 
-            this.log(`Démarrage V7.4 (Core).`, "🚀");
+            this.log(`Démarrage V8.0 (Architecture Resolver).`, "🚀");
 
             const finish = (reason) => {
                 if (observer) observer.disconnect();
                 if (silenceTimer) clearTimeout(silenceTimer);
                 
+                // Analyse Gap (Untouched)
                 const allDomKeys = new Set();
                 document.querySelectorAll('[data-clef]').forEach(el => {
                     if(el.offsetParent !== null) allDomKeys.add(el.getAttribute('data-clef'));
                 });
-
                 const untouched = Array.from(allDomKeys).filter(domKey => {
                     if (touchedKeys.has(domKey)) return false;
                     for (let touched of touchedKeys) {
@@ -66,25 +137,40 @@ window.FormulaireTester = {
                 const keysToRemove = [];
 
                 for (const [key, value] of Object.entries(this.pendingData)) {
-                    const strategy = this.findStrategy(key, this.fullScenarioData);
-                    let status = 'ABSENT';
-
-                    if (strategy && strategy.customFill) {
-                        status = await strategy.customFill(key, value, this.fullScenarioData, this);
-                    } else {
-                        const el = this.findElement(key);
-                        if (el && el.offsetParent !== null) {
-                            if (this.isValueAlreadySet(el, value)) {
-                                status = 'SKIPPED';
-                            } else {
-                                const ok = this.fillField(el, value);
-                                status = ok ? 'OK' : 'KO';
-                            }
-                        }
+                    
+                    // 1. Recherche de l'élément DOM
+                    const element = this.findElement(key);
+                    
+                    // Si pas d'élément, on ne peut rien faire (sauf si une stratégie métier pure existe, mais rare)
+                    if (!element || element.offsetParent === null) {
+                        // Element absent ou invisible
+                        continue; 
                     }
 
+                    // 2. Résolution de la Stratégie
+                    const strategy = this.resolveStrategy(key, element, this.fullScenarioData);
+
+                    let status = 'ABSENT';
+                    
+                    if (strategy) {
+                        // 3. Exécution de la stratégie
+                        // Note: C'est ici que toute la magie opère
+                        try {
+                            status = await strategy.execute(element, value, this.fullScenarioData, this);
+                        } catch (e) {
+                            console.error(`Erreur stratégie ${strategy.id} sur ${key}:`, e);
+                            status = 'KO';
+                        }
+                    } else {
+                        // Aucune stratégie trouvée (même pas Default Input ?)
+                        // Cela ne devrait pas arriver si Native_Input_Default est bien chargé.
+                        this.log(`Aucune stratégie pour ${key} (${element.tagName})`, '❓');
+                        status = 'KO';
+                    }
+
+                    // 4. Traitement du résultat
                     if (status === 'OK') {
-                        this.log(`Rempli : ${key}`, '✅');
+                        this.log(`Rempli [${strategy.id}] : ${key}`, '✅');
                         report.push({ key: key, status: 'OK', time: new Date().toLocaleTimeString() });
                         touchedKeys.add(key); 
                         activityDetected = true;
@@ -117,81 +203,5 @@ window.FormulaireTester = {
             bumpTimer();
             scanAndFill();
         });
-    },
-
-    findStrategy: function (key, fullData) {
-        const normalizedData = this.normalizeBooleans(fullData);
-        // On utilise this.strategies qui aura été peuplé par strategies.js
-        if (!this.strategies) return undefined;
-        return this.strategies.find(s => s.matches(key) && s.isActive(key, normalizedData));
-    },
-
-    // ... LES FONCTIONS SUIVANTES SONT INCHANGÉES ...
-    // (Copie ici prepareData, normalizeBooleans, findElement, isValueAlreadySet, fillField depuis la version précédente)
-    prepareData: function (input) {
-        let rawData = input.donnees ? input.donnees : input;
-        let clean = {};
-        const fullRawData = this.normalizeBooleans(rawData);
-        let keysToIgnore = new Set();
-        Object.keys(fullRawData).forEach(key => {
-            const strategy = this.findStrategy(key, fullRawData);
-            if (strategy && strategy.getIgnoredKeys) {
-                strategy.getIgnoredKeys(key).forEach(k => keysToIgnore.add(k));
-            }
-        });
-        for (const [key, val] of Object.entries(fullRawData)) {
-            if (val === null || val === "") continue;
-            if (keysToIgnore.has(key)) continue;
-            let finalKey = key;
-            if (key.endsWith('_libelle')) finalKey = key.replace('_libelle', '');
-            if (key.endsWith('_valeur') && fullRawData[key.replace('_valeur', '_libelle')]) continue;
-            clean[finalKey] = val;
-        }
-        return clean;
-    },
-    normalizeBooleans: function (data) {
-        const out = {};
-        for (const [k, v] of Object.entries(data)) {
-            out[k] = (v === "true" || v === true) ? true : ((v === "false" || v === false) ? false : v);
-        }
-        return out;
-    },
-    findElement: function (key) {
-        const container = document.querySelector(`[data-clef="${key}"]`);
-        if (container) {
-            if (['input', 'select', 'textarea'].includes(container.tagName.toLowerCase())) return container;
-            return container.querySelector('input, select, textarea');
-        }
-        return document.querySelector(`#${key}, [name="${key}"]`);
-    },
-    isValueAlreadySet: function (el, val) {
-        if (el.type === 'checkbox' || el.type === 'radio') return el.checked === val;
-        return el.value == val;
-    },
-    fillField: function (el, val) {
-        try {
-            el.focus();
-            const tag = el.tagName.toLowerCase();
-            const type = el.type ? el.type.toLowerCase() : '';
-            if (type === 'checkbox' || type === 'radio') {
-                if (el.checked !== val) el.click();
-            } else if (tag === 'select') {
-                let found = false;
-                for (let i = 0; i < el.options.length; i++) {
-                    if (el.options[i].text.includes(val)) {
-                        el.selectedIndex = i;
-                        found = true;
-                        break;
-                    }
-                }
-                if (found) el.dispatchEvent(new Event('change', { bubbles: true }));
-            } else {
-                el.value = val;
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            el.blur();
-            return true;
-        } catch (e) { return false; }
     }
 };
