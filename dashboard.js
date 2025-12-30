@@ -1,64 +1,86 @@
 /**
- * DASHBOARD V5 - Full Screen & Import Fichier
- * Interface immersive qui recouvre la page + Réintégration de l'upload JSON.
+ * DASHBOARD V6 - Style "Service Public" & Correction URL
  */
 (function() {
-    // --- STYLE CSS (Mode Full Screen) ---
+    // --- STYLE CSS (Thème Clair / Officiel) ---
     const STYLE = `
         #mon-dashboard-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #121212; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
-            z-index: 2147483647; /* Z-index maximum */
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            padding: 20px; box-sizing: border-box;
+            background: rgba(0, 0, 0, 0.5); /* Fond semi-transparent standard */
+            font-family: 'Marianne', 'Segoe UI', sans-serif;
+            z-index: 2147483647;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(2px);
         }
         .dash-container {
-            width: 100%; max-width: 800px; background: #1e1e1e; 
-            padding: 30px; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-            display: flex; flex-direction: column; gap: 20px;
-            border: 1px solid #333;
+            width: 100%; max-width: 800px; 
+            background: #ffffff; color: #161616;
+            padding: 40px; border-radius: 0; /* Pas d'arrondi ou très peu */
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; gap: 24px;
+            border-top: 4px solid #000091; /* La barre bleue officielle */
         }
-        h1 { margin: 0; font-size: 24px; color: #fff; text-align: center; margin-bottom: 10px; }
+        h1 { 
+            margin: 0; font-size: 28px; font-weight: 700; color: #161616; 
+            margin-bottom: 5px; 
+        }
+        .dash-subtitle {
+            font-size: 14px; color: #666; margin-bottom: 20px;
+        }
         .dash-info { 
-            text-align: center; color: #aaa; font-size: 14px; 
-            background: #252526; padding: 10px; border-radius: 6px; border: 1px solid #333;
+            background: #f0f0f0; color: #333; padding: 12px; 
+            font-size: 14px; border-left: 4px solid #666;
         }
-        .dash-section { display: flex; flex-direction: column; gap: 8px; }
-        label { font-weight: bold; color: #4ade80; font-size: 13px; text-transform: uppercase; }
+        .dash-section { display: flex; flex-direction: column; gap: 10px; }
+        
+        label { 
+            font-weight: 700; color: #161616; font-size: 16px; 
+        }
         
         /* Zone de Drop / Import */
         .file-drop-zone {
-            border: 2px dashed #444; border-radius: 8px; padding: 20px;
-            text-align: center; cursor: pointer; transition: 0.2s; background: #252526;
-            color: #888;
+            border: 2px dashed #ccc; background: #f9f9f9;
+            padding: 30px; text-align: center; cursor: pointer; 
+            color: #000091; font-weight: 500; transition: 0.2s;
         }
-        .file-drop-zone:hover { border-color: #4ade80; color: #fff; background: #2d2d2d; }
+        .file-drop-zone:hover { 
+            border-color: #000091; background: #ececff; 
+        }
         input[type="file"] { display: none; }
 
         textarea {
-            width: 100%; height: 300px; background: #111; color: #bbb;
-            border: 1px solid #333; border-radius: 6px; padding: 15px;
-            font-family: 'Consolas', monospace; font-size: 12px; resize: vertical;
+            width: 100%; height: 300px; 
+            background: #fff; color: #161616;
+            border: 1px solid #ccc; padding: 15px;
+            font-family: 'Consolas', monospace; font-size: 13px; 
+            resize: vertical; outline: none;
         }
+        textarea:focus { border-color: #000091; box-shadow: 0 0 0 1px #000091; }
         
-        .actions { display: flex; gap: 15px; margin-top: 10px; }
+        .actions { display: flex; gap: 20px; margin-top: 10px; justify-content: flex-end; }
+        
         button {
-            flex: 1; padding: 15px; border: none; border-radius: 6px;
-            font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s;
+            padding: 12px 24px; border: none; font-size: 16px; 
+            font-weight: 500; cursor: pointer; transition: 0.2s;
         }
-        #btn-run { background: #000091; color: white; }
-        #btn-run:hover { background: #0000bd; }
-        #btn-close { background: #333; color: #ccc; max-width: 150px; }
-        #btn-close:hover { background: #444; color: white; }
+        #btn-run { 
+            background: #000091; color: white; 
+        }
+        #btn-run:hover { background: #1212ff; }
+        
+        #btn-close { 
+            background: white; color: #000091; border: 1px solid #000091; 
+        }
+        #btn-close:hover { background: #f5f5fe; }
     `;
 
     // 1. Nettoyage
     const existing = document.getElementById('mon-dashboard-overlay');
     if (existing) existing.remove();
 
-    if (!document.getElementById('dash-style-v5')) {
+    if (!document.getElementById('dash-style-v6')) {
         const styleEl = document.createElement('style');
-        styleEl.id = 'dash-style-v5';
+        styleEl.id = 'dash-style-v6';
         styleEl.textContent = STYLE;
         document.head.appendChild(styleEl);
     }
@@ -73,28 +95,31 @@
     
     overlay.innerHTML = `
         <div class="dash-container">
-            <h1>🎛️ NPSL Auto-Tester</h1>
+            <div>
+                <h1>Outil de Test Automatisé</h1>
+                <div class="dash-subtitle">NPSL Executeur de Scénario</div>
+            </div>
             
             <div class="dash-info">
-                Environnement détecté : <strong style="color:#fff">${currentOrigin}</strong>
+                Environnement cible : <strong>${currentOrigin}</strong>
             </div>
 
             <div class="dash-section">
-                <label>1. Charger un scénario (JSON)</label>
+                <label>1. Charger un fichier de configuration</label>
                 <label class="file-drop-zone" for="json-upload">
-                    📂 Cliquez ici pour sélectionner un fichier JSON...
+                    📂 Sélectionner un fichier JSON (ou glisser-déposer)
                     <input type="file" id="json-upload" accept=".json">
                 </label>
             </div>
 
             <div class="dash-section">
-                <label>2. Vérifier / Modifier les données</label>
-                <textarea id="dash-json" spellcheck="false" placeholder="Le contenu du JSON apparaîtra ici...">${savedJson}</textarea>
+                <label>2. Vérifier les données</label>
+                <textarea id="dash-json" spellcheck="false" placeholder='{ "codeDemarche": "...", "donnees": { ... } }'>${savedJson}</textarea>
             </div>
 
             <div class="actions">
                 <button id="btn-close">Fermer</button>
-                <button id="btn-run">▶ Lancer le Test</button>
+                <button id="btn-run">Lancer le Test</button>
             </div>
         </div>
     `;
@@ -109,10 +134,9 @@
     const fileInput = document.getElementById('json-upload');
     const dropZone = document.querySelector('.file-drop-zone');
 
-    // Gestion Fermeture
     btnClose.onclick = () => overlay.remove();
 
-    // Gestion Import Fichier JSON
+    // Import Fichier
     fileInput.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -120,45 +144,42 @@
         const reader = new FileReader();
         reader.onload = (event) => {
             try {
-                // Vérification basique que c'est du JSON
                 const content = event.target.result;
-                JSON.parse(content); 
-                
-                // Injection dans la textarea
+                JSON.parse(content); // Vérif JSON
                 txtJson.value = content;
                 dropZone.innerText = `✅ Fichier chargé : ${file.name}`;
-                dropZone.style.borderColor = "#4ade80";
-                dropZone.style.color = "#4ade80";
+                dropZone.style.borderColor = "#000091";
+                dropZone.style.background = "#f0f0ff";
             } catch (err) {
-                alert("❌ Fichier invalide : Ce n'est pas un JSON correct.");
+                alert("❌ Erreur : Le fichier sélectionné n'est pas un JSON valide.");
             }
         };
         reader.readAsText(file);
     };
 
-    // Gestion Lancement
+    // Lancement
     btnRun.onclick = () => {
         try {
             const jsonStr = txtJson.value.trim();
-            if(!jsonStr) { alert("Merci de coller ou charger un JSON."); return; }
+            if(!jsonStr) { alert("Veuillez fournir un JSON de configuration."); return; }
 
-            const jsonObj = JSON.parse(jsonStr); // Validation
+            const jsonObj = JSON.parse(jsonStr);
             
             if (!jsonObj.codeDemarche) {
-                alert("⚠️ Erreur : La propriété 'codeDemarche' est manquante dans le JSON.");
+                alert("⚠️ Propriété 'codeDemarche' manquante dans le JSON.");
                 return;
             }
 
-            // 1. Sauvegarde Locale
+            // Sauvegarde
             localStorage.setItem('TEST_SCENARIO', jsonStr);
 
-            // 2. Construction URL (Même domaine)
-            const targetPath = `/mademarche/${jsonObj.codeDemarche}/demarche`;
+            // Construction URL (CORRIGÉE)
+            // Ancien : /mademarche/${code}/demarche
+            // Nouveau : /mademarche/demarcheGenerique/?codeDemarche=${code}
+            const targetPath = `/mademarche/demarcheGenerique/?codeDemarche=${jsonObj.codeDemarche}`;
             
-            // 3. Navigation
-            // On vérifie si on est déjà sur la bonne URL pour éviter un reload inutile
-            if (window.location.pathname.includes(targetPath)) {
-                // Si on est déjà sur la page, on recharge juste pour reset le formulaire
+            // Navigation
+            if (window.location.pathname + window.location.search === targetPath) {
                 window.location.reload();
             } else {
                 window.location.assign(targetPath);
