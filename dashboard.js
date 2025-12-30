@@ -1,135 +1,171 @@
 /**
- * DASHBOARD V4 - Mode "Same Origin" (Pas de limite de taille)
- * Fonctionne uniquement sur le domaine courant.
+ * DASHBOARD V5 - Full Screen & Import Fichier
+ * Interface immersive qui recouvre la page + Réintégration de l'upload JSON.
  */
 (function() {
-    // --- STYLE CSS (Inchangé) ---
+    // --- STYLE CSS (Mode Full Screen) ---
     const STYLE = `
-        #mon-dashboard {
-            position: fixed; top: 50px; right: 20px; width: 400px;
-            background: #1e1e1e; color: #eee; font-family: sans-serif;
-            border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            z-index: 10000; display: flex; flex-direction: column;
+        #mon-dashboard-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #121212; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
+            z-index: 2147483647; /* Z-index maximum */
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 20px; box-sizing: border-box;
+        }
+        .dash-container {
+            width: 100%; max-width: 800px; background: #1e1e1e; 
+            padding: 30px; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; gap: 20px;
             border: 1px solid #333;
         }
-        #mon-dashboard-header {
-            padding: 10px 15px; background: #252526; border-bottom: 1px solid #333;
-            display: flex; justify-content: space-between; align-items: center;
-            border-radius: 8px 8px 0 0; font-weight: bold; cursor: move;
+        h1 { margin: 0; font-size: 24px; color: #fff; text-align: center; margin-bottom: 10px; }
+        .dash-info { 
+            text-align: center; color: #aaa; font-size: 14px; 
+            background: #252526; padding: 10px; border-radius: 6px; border: 1px solid #333;
         }
-        #mon-dashboard-body { padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .dash-row { display: flex; flex-direction: column; gap: 5px; }
-        .dash-label { font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
-        .dash-info { font-size: 11px; color: #4ade80; background: #333; padding: 5px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dash-section { display: flex; flex-direction: column; gap: 8px; }
+        label { font-weight: bold; color: #4ade80; font-size: 13px; text-transform: uppercase; }
+        
+        /* Zone de Drop / Import */
+        .file-drop-zone {
+            border: 2px dashed #444; border-radius: 8px; padding: 20px;
+            text-align: center; cursor: pointer; transition: 0.2s; background: #252526;
+            color: #888;
+        }
+        .file-drop-zone:hover { border-color: #4ade80; color: #fff; background: #2d2d2d; }
+        input[type="file"] { display: none; }
+
         textarea {
-            width: 100%; height: 250px; background: #111; color: #4ade80;
-            border: 1px solid #333; border-radius: 4px; padding: 10px;
-            font-family: monospace; font-size: 11px; resize: vertical;
+            width: 100%; height: 300px; background: #111; color: #bbb;
+            border: 1px solid #333; border-radius: 6px; padding: 15px;
+            font-family: 'Consolas', monospace; font-size: 12px; resize: vertical;
         }
+        
+        .actions { display: flex; gap: 15px; margin-top: 10px; }
         button {
-            background: #000091; color: white; border: none; padding: 10px;
-            border-radius: 4px; cursor: pointer; font-weight: bold;
-            transition: background 0.2s;
+            flex: 1; padding: 15px; border: none; border-radius: 6px;
+            font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s;
         }
-        button:hover { background: #0000bd; }
-        .close-btn { background: none; border: none; color: #aaa; cursor: pointer; font-size: 16px; }
-        .close-btn:hover { color: white; }
+        #btn-run { background: #000091; color: white; }
+        #btn-run:hover { background: #0000bd; }
+        #btn-close { background: #333; color: #ccc; max-width: 150px; }
+        #btn-close:hover { background: #444; color: white; }
     `;
 
-    // Nettoyage précédent
-    const existing = document.getElementById('mon-dashboard');
+    // 1. Nettoyage
+    const existing = document.getElementById('mon-dashboard-overlay');
     if (existing) existing.remove();
 
-    if (!document.getElementById('dash-style')) {
+    if (!document.getElementById('dash-style-v5')) {
         const styleEl = document.createElement('style');
-        styleEl.id = 'dash-style';
+        styleEl.id = 'dash-style-v5';
         styleEl.textContent = STYLE;
         document.head.appendChild(styleEl);
     }
 
-    const dash = document.createElement('div');
-    dash.id = 'mon-dashboard';
-    
-    // Récupération du JSON sauvegardé (Local Storage est spécifique au domaine, donc pas de conflit Prod/Qualif)
-    const savedJson = localStorage.getItem('TEST_SCENARIO') || '{\n  "codeDemarche": "PVPP",\n  "donnees": {\n    \n  }\n}';
-    
-    // Détection de l'origine actuelle
+    // 2. Récupération Données
+    const savedJson = localStorage.getItem('TEST_SCENARIO') || '';
     const currentOrigin = window.location.origin;
 
-    dash.innerHTML = `
-        <div id="mon-dashboard-header">
-            <span>🎛️ NPSL Tester (Mode Local)</span>
-            <button class="close-btn" onclick="document.getElementById('mon-dashboard').remove()">✕</button>
-        </div>
-        <div id="mon-dashboard-body">
+    // 3. Construction du DOM
+    const overlay = document.createElement('div');
+    overlay.id = 'mon-dashboard-overlay';
+    
+    overlay.innerHTML = `
+        <div class="dash-container">
+            <h1>🎛️ NPSL Auto-Tester</h1>
             
-            <div class="dash-row">
-                <label class="dash-label">Origine détectée</label>
-                <div class="dash-info" title="${currentOrigin}">${currentOrigin}</div>
+            <div class="dash-info">
+                Environnement détecté : <strong style="color:#fff">${currentOrigin}</strong>
             </div>
 
-            <div class="dash-row">
-                <label class="dash-label">Données de test (JSON)</label>
-                <textarea id="dash-json" spellcheck="false" placeholder="Collez votre JSON ici...">${savedJson}</textarea>
+            <div class="dash-section">
+                <label>1. Charger un scénario (JSON)</label>
+                <label class="file-drop-zone" for="json-upload">
+                    📂 Cliquez ici pour sélectionner un fichier JSON...
+                    <input type="file" id="json-upload" accept=".json">
+                </label>
             </div>
 
-            <button id="btn-run-local">▶ Sauvegarder et Lancer ici</button>
+            <div class="dash-section">
+                <label>2. Vérifier / Modifier les données</label>
+                <textarea id="dash-json" spellcheck="false" placeholder="Le contenu du JSON apparaîtra ici...">${savedJson}</textarea>
+            </div>
+
+            <div class="actions">
+                <button id="btn-close">Fermer</button>
+                <button id="btn-run">▶ Lancer le Test</button>
+            </div>
         </div>
     `;
 
-    document.body.appendChild(dash);
+    document.body.appendChild(overlay);
 
-    // --- LOGIQUE ---
-    const btnRun = document.getElementById('btn-run-local');
+    // --- LOGIQUE JS ---
+
+    const btnRun = document.getElementById('btn-run');
+    const btnClose = document.getElementById('btn-close');
     const txtJson = document.getElementById('dash-json');
+    const fileInput = document.getElementById('json-upload');
+    const dropZone = document.querySelector('.file-drop-zone');
 
+    // Gestion Fermeture
+    btnClose.onclick = () => overlay.remove();
+
+    // Gestion Import Fichier JSON
+    fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                // Vérification basique que c'est du JSON
+                const content = event.target.result;
+                JSON.parse(content); 
+                
+                // Injection dans la textarea
+                txtJson.value = content;
+                dropZone.innerText = `✅ Fichier chargé : ${file.name}`;
+                dropZone.style.borderColor = "#4ade80";
+                dropZone.style.color = "#4ade80";
+            } catch (err) {
+                alert("❌ Fichier invalide : Ce n'est pas un JSON correct.");
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    // Gestion Lancement
     btnRun.onclick = () => {
         try {
-            const jsonStr = txtJson.value;
-            const jsonObj = JSON.parse(jsonStr); // Validation JSON
+            const jsonStr = txtJson.value.trim();
+            if(!jsonStr) { alert("Merci de coller ou charger un JSON."); return; }
+
+            const jsonObj = JSON.parse(jsonStr); // Validation
             
             if (!jsonObj.codeDemarche) {
                 alert("⚠️ Erreur : La propriété 'codeDemarche' est manquante dans le JSON.");
                 return;
             }
 
-            // 1. Sauvegarde dans le localStorage DU DOMAINE COURANT
-            // Comme on est sur la même origine, pas de limite de taille URL.
+            // 1. Sauvegarde Locale
             localStorage.setItem('TEST_SCENARIO', jsonStr);
-            console.log("[Dashboard] Scénario sauvegardé en local.");
 
-            // 2. Construction de l'URL cible (Relative ou Absolue sur même domaine)
-            // On reste sur la même origine, on change juste le path.
+            // 2. Construction URL (Même domaine)
             const targetPath = `/mademarche/${jsonObj.codeDemarche}/demarche`;
             
             // 3. Navigation
-            // On vérifie si on est déjà sur la bonne page pour éviter un rechargement inutile ?
-            // Non, pour un test, il vaut mieux recharger proprement la page.
-            console.log(`[Dashboard] Redirection vers ${targetPath}`);
-            window.location.assign(targetPath);
+            // On vérifie si on est déjà sur la bonne URL pour éviter un reload inutile
+            if (window.location.pathname.includes(targetPath)) {
+                // Si on est déjà sur la page, on recharge juste pour reset le formulaire
+                window.location.reload();
+            } else {
+                window.location.assign(targetPath);
+            }
             
         } catch (e) {
             alert("❌ JSON Invalide : " + e.message);
         }
     };
-
-    // Drag & Drop
-    const header = document.getElementById('mon-dashboard-header');
-    let isDown = false, offset = [0,0];
-    
-    header.onmousedown = (e) => {
-        isDown = true;
-        offset = [dash.offsetLeft - e.clientX, dash.offsetTop - e.clientY];
-    };
-    
-    document.onmouseup = () => isDown = false;
-    
-    document.onmousemove = (e) => {
-        if (isDown) {
-            dash.style.left = (e.clientX + offset[0]) + 'px';
-            dash.style.top  = (e.clientY + offset[1]) + 'px';
-            dash.style.right = 'auto'; 
-        }
-    };
-
 })();
