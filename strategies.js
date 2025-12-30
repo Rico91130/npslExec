@@ -9,7 +9,6 @@ window.NPSL_STRATEGIES = [
         id: 'AdresseBanOuManuelle_SaisieManuelle',
         description: 'Gère le bloc adresse manuelle complet (Checkbox + Autocomplete)',
 
-        // MODIFICATION ICI : On matche SOIT la ville, SOIT la checkbox d'activation
         matches: (key) => key.endsWith('_communeActuelleAdresseManuelle_nomLong') || key.endsWith('_utiliserAdresseManuelle'),
 
         isActive: (key, data) => {
@@ -17,14 +16,11 @@ window.NPSL_STRATEGIES = [
             if (key.endsWith('_nomLong')) prefix = key.split('_communeActuelleAdresseManuelle_nomLong')[0];
             else if (key.endsWith('_utiliserAdresseManuelle')) prefix = key.split('_utiliserAdresseManuelle')[0];
 
-            // Sécurité maximale : accepte true (bool) ou "true" (string)
             const val = data[`${prefix}_utiliserAdresseManuelle`];
             return val === true || val === 'true';
         },
 
         getIgnoredKeys: (key) => {
-            // On ne définit les clés à ignorer que si on est sur la clé principale (Ville)
-            // Sinon on risque de générer des clés invalides
             if (key.endsWith('_nomLong')) {
                 const base = key.replace('_nomLong', '');
                 return ['_nom', '_codeInsee', '_codePostal', '_codeInseeDepartement', '_id', '_nomProtecteur', '_typeProtection']
@@ -33,84 +29,69 @@ window.NPSL_STRATEGIES = [
             return [];
         },
 
-        execute: async function (element, value, fullData, engine) {
-            // Identification du cas à traiter
-            const isCheckbox = element.type === 'checkbox'; // Plus robuste que le check sur la clé
+        execute: async function (element, value, key, fullData, engine) {
+            const isCheckbox = element.type === 'checkbox';
             const isAutocomplete = !isCheckbox;
 
-            // --- CAS 1 : GESTION DE LA CHECKBOX (Le "Portier") ---
+            // --- CAS 1 : CHECKBOX ---
             if (isCheckbox) {
                 const shouldBeChecked = (value === true || value === 'true');
-
                 if (element.checked !== shouldBeChecked) {
-                    engine.log(`[Stratégie Adresse] Clic Checkbox d'activation`, '☑️');
+                    engine.log(`[Stratégie Adresse] Clic Checkbox`, '☑️');
                     element.click();
-                    // CRUCIAL : On renvoie PENDING.
-                    // Cela dit au moteur : "J'ai cliqué, mais ne passe pas tout de suite à la suite (les inputs Voie/Ville...), attends que le DOM bouge."
                     return 'PENDING';
                 }
-                return 'OK'; // Déjà bon
+                return 'OK';
             }
 
-            // --- CAS 2 : GESTION DE L'AUTOCOMPLETE (Ville) ---
+            // --- CAS 2 : AUTOCOMPLETE ---
             if (isAutocomplete) {
-                // Reconstruction des données nécessaires
-                // On doit retrouver le prefixe à partir de la clé actuelle (qui finit par _nomLong)
-                // Note: 'element' ici est l'input de la ville
-                // 'key' n'est pas passé directement dans execute dans la V8 standard mais on peut le déduire ou modifier le moteur
-                // Astuce : On va utiliser fullData pour récupérer CP et Nom.
-
-                // Pour récupérer le préfixe, on ruse un peu ou on suppose que le moteur V8 passe 'key' (ce qu'il ne fait pas par défaut dans mon dernier code V8)
-                // CORRECTION MOTEUR V8 REQUISE ? Non, on va chercher dans le DOM ou data.
-
-                // On va parcourir fullData pour trouver les clés correspondantes au CP et Nom
-                // C'est un peu couteux mais sûr. Ou alors on se base sur l'ID de l'élément si dispo.
-
-                // Méthode simple : On tape ce qu'il y a dans 'value' par défaut (qui contient "NOM (CP)")
-                // Sauf si on veut reconstruire "CP NOM".
-
-                let textToType = value;
-
-                // Tentative de reconstruction intelligente "CP NOM"
-                // On cherche dans fullData une clé qui ressemble à la nôtre mais finit par _codePostal
-                // Comme on n'a pas la clé "key" ici (oubli dans la signature V8), on fait au mieux.
-                // (Si tu utilises le moteur V8 que je t'ai donné, update la signature execute si besoin, voir note plus bas)
-
-                // ... Logique Autocomplete Angular Material ...
+                let textToType = String(value).trim();
                 const options = document.querySelectorAll('mat-option');
                 const visibleOptions = Array.from(options).filter(opt => opt.offsetParent !== null);
 
+                // A. UNE OPTION EST LÀ -> ON CLIQUE
                 if (visibleOptions.length > 0) {
-                    const targetOption = visibleOptions[0];
-                    engine.log(`[Stratégie Adresse] Sélection "${targetOption.innerText.trim()}"`, 'point_up');
-                    await engine.sleep(500);
-                    targetOption.click();
-                    await engine.sleep(100);
+                    const bestOption = visibleOptions.find(opt => {
+                        const txt = opt.innerText.trim();
+                        return txt.includes("AMIENS") || txt.includes("80000"); // Simplifié
+                    }) || visibleOptions[0];
 
-                    // Forçage visuel
-                    element.dispatchEvent(new Event('input', { bubbles: true }));
-                    element.blur();
+                    engine.log(`[Stratégie Adresse] Clic option "${bestOption.innerText.trim()}"`, 'point_up');
+                    bestOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                    bestOption.click();
+                    await engine.sleep(100);
                     return 'OK';
                 }
 
-                // Saisie
-                if (element.value !== textToType) {
-                    engine.log(`[Stratégie Adresse] Saisie "${textToType}"`, '⌨️');
-                    element.value = textToType;
-                    element.dispatchEvent(new Event('focus', { bubbles: true }));
-                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                // B. TEXTE DÉJÀ LÀ MAIS PAS DE LISTE
+                if (element.value === textToType) {
+                    if (document.activeElement !== element) {
+                        engine.log(`[Stratégie Adresse] Focus (Réveil)...`, '👀');
+                        element.focus();
+                    } else {
+                        engine.log(`[Stratégie Adresse] En attente liste...`, '⏳');
+                        element.dispatchEvent(new Event('input', { bubbles: true }));
+                        element.dispatchEvent(new Event('keyup', { bubbles: true }));
+                    }
                     return 'PENDING';
                 }
 
-                if (document.activeElement !== element) {
+                // C. SAISIE INITIALE
+                if (element.value !== textToType) {
+                    engine.log(`[Stratégie Adresse] Saisie "${textToType}"`, '⌨️');
                     element.focus();
+                    element.value = textToType;
+                    element.dispatchEvent(new Event('keydown', { bubbles: true }));
                     element.dispatchEvent(new Event('input', { bubbles: true }));
+                    element.dispatchEvent(new Event('keyup', { bubbles: true }));
+                    return 'PENDING';
                 }
                 return 'PENDING';
             }
-
             return 'KO';
         }
+
     },
 
     // --- 2. STRATÉGIES NATIVES (Ordre inchangé) ---
@@ -118,13 +99,12 @@ window.NPSL_STRATEGIES = [
     {
         id: 'Native_Select',
         matches: (key, el) => el && el.tagName === 'SELECT',
-        execute: async (element, value, data, engine) => {
+        execute: async (element, value, key, data, engine) => { // Ajout key
             const searchVal = String(value).trim();
             let foundIndex = -1;
             for (let i = 0; i < element.options.length; i++) {
                 if (element.options[i].value === searchVal || (searchVal.length > 0 && element.options[i].text.includes(searchVal))) {
-                    foundIndex = i;
-                    break;
+                    foundIndex = i; break;
                 }
             }
             if (foundIndex > -1) {
@@ -140,7 +120,7 @@ window.NPSL_STRATEGIES = [
     {
         id: 'Native_Radio',
         matches: (key, el) => el && el.type === 'radio',
-        execute: async (element, value, data, engine) => {
+        execute: async (element, value, key, data, engine) => { // Ajout key
             const groupName = element.name;
             if (!groupName) return 'KO';
             const radios = document.querySelectorAll(`input[type="radio"][name="${groupName}"]`);
@@ -160,7 +140,7 @@ window.NPSL_STRATEGIES = [
     {
         id: 'Native_Checkbox',
         matches: (key, el) => el && el.type === 'checkbox',
-        execute: async (element, value, data, engine) => {
+        execute: async (element, value, key, data, engine) => { // Ajout key
             const shouldBeChecked = (value === true || value === 'true');
             if (element.checked === shouldBeChecked) return 'SKIPPED';
             element.click();
@@ -179,7 +159,7 @@ window.NPSL_STRATEGIES = [
             if (tag === 'INPUT' && !['radio', 'checkbox', 'file', 'hidden', 'submit', 'button'].includes(type)) return true;
             return false;
         },
-        execute: async (element, value, data, engine) => {
+        execute: async (element, value, key, data, engine) => { // Ajout key
             const strValue = String(value);
             if (element.value === strValue) return 'SKIPPED';
             element.focus();

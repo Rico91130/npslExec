@@ -155,7 +155,7 @@ window.FormulaireTester = {
                     
                     if (strategy) {
                         try {
-                            status = await strategy.execute(element, value, this.fullScenarioData, this);
+                            status = await strategy.execute(element, value, key, this.fullScenarioData, this);
                         } catch (e) {
                             console.error(`Erreur stratégie ${strategy.id} sur ${key}:`, e);
                             status = 'KO';
